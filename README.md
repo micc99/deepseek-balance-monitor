@@ -24,10 +24,7 @@
 <summary><b>🖥️ 主窗口</b></summary>
 <br>
 
-<!-- 将截图放到 assets/screenshots/ 目录，然后取消下方注释 -->
-<!-- ![主窗口](assets/screenshots/main_window.png) -->
-
-
+![主窗口](assets/screenshots/main_window.png)
 
 </details>
 
@@ -35,9 +32,7 @@
 <summary><b>💬 桌面悬浮窗</b></summary>
 <br>
 
-<!-- ![悬浮窗](assets/screenshots/floating_window.png) -->
-
-
+![悬浮窗](assets/screenshots/floating_window.png)
 
 </details>
 
