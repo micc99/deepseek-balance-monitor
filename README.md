@@ -18,7 +18,7 @@
 
 ## 📸 预览
 
-> 💡 点击下方展开查看界面截图（建议将截图保存到 `assets/screenshots/` 目录）
+> 💡 点击下方展开查看界面截图
 
 <details>
 <summary><b>🖥️ 主窗口</b></summary>
