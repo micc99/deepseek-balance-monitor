@@ -27,7 +27,7 @@
 <!-- 将截图放到 assets/screenshots/ 目录，然后取消下方注释 -->
 <!-- ![主窗口](assets/screenshots/main_window.png) -->
 
-*（截图待上传）*
+
 
 </details>
 
@@ -37,19 +37,10 @@
 
 <!-- ![悬浮窗](assets/screenshots/floating_window.png) -->
 
-*（截图待上传）*
+
 
 </details>
 
-<details>
-<summary><b>⚙️ 设置面板</b></summary>
-<br>
-
-<!-- ![设置](assets/screenshots/settings.png) -->
-
-*（截图待上传）*
-
-</details>
 
 ---
 
