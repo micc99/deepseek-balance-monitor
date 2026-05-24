@@ -3,6 +3,8 @@ on:
   push:
     tags:
       - "v*"           # 推送 v1.0、v2.0 等标签时触发
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
