@@ -1,0 +1,6 @@
+customtkinter>=5.2.0
+requests>=2.28.0
+pystray>=0.19.0
+Pillow>=9.0.0
+
+//pyinstaller --windowed --icon=deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor v1.1" main.py

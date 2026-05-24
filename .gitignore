@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+config.json
+assets/
+.idea/
+dist/
+build/
+*.spec
+docs/
