@@ -16,12 +16,15 @@ jobs:
           python-version: "3.10"
       - name: Install dependencies
         run: |
+          cd  main
           pip install pyinstaller pillow
           pip install -r requirements.txt
           pip install pyinstaller
       - name: Build exe
-        run:           pyinstaller --onefile --windowed --icon=deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor" main.py
+        run:
+          cd  main
+          pyinstaller --onefile --windowed --icon=deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor" main.py
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/DeepSeekBalanceMonitor.exe
+          files: main/dist/DeepSeekBalanceMonitor.exe
