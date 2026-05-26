@@ -89,13 +89,17 @@ class AccountRow(ctk.CTkFrame):
         account: AccountConfig,
         on_edit: Callable,
         on_delete: Callable,
+        on_view_curve: Optional[Callable] = None,
     ):
         super().__init__(master, fg_color="transparent")
         self.uid = uid
         self.account = account
         self._on_edit = on_edit
         self._on_delete = on_delete
+        self._on_view_curve = on_view_curve
         self._prev_balance: str = ""
+        self._tooltip: Optional[ctk.CTkToplevel] = None
+        self._tooltip_after: Optional[str] = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -149,6 +153,9 @@ class AccountRow(ctk.CTkFrame):
             anchor="w",
         )
         self.balance_label.grid(row=0, column=3, sticky="ew", padx=2, pady=4)
+        self.balance_label.bind("<Double-Button-1>", self._on_double_click_balance)
+        self.balance_label.bind("<Enter>", self._on_balance_enter, add="+")
+        self.balance_label.bind("<Leave>", self._on_balance_leave, add="+")
 
         self.status_dot = ctk.CTkLabel(
             self,
@@ -198,6 +205,53 @@ class AccountRow(ctk.CTkFrame):
         elif info.status == BalanceStatus.LOADING:
             self.status_dot.configure(text_color="#ff9800")
             self.balance_label.configure(text="检测中...", text_color="gray")
+
+    def _on_double_click_balance(self, _event):
+        if self._on_view_curve:
+            self._on_view_curve(self.account)
+
+    def _show_tooltip(self, text: str):
+        if self._tooltip:
+            return
+        top = self.winfo_toplevel()
+        tl = ctk.CTkToplevel(top)
+        tl.overrideredirect(True)
+        tl.attributes("-topmost", True)
+        tl.resizable(False, False)
+        frame = ctk.CTkFrame(tl, corner_radius=6, fg_color=("gray20", "gray30"))
+        frame.pack(fill="both", expand=True, padx=2, pady=2)
+        ctk.CTkLabel(
+            frame,
+            text=text,
+            font=ctk.CTkFont(size=11),
+            text_color=("#ffffff", "#ffffff"),
+        ).pack(padx=8, pady=4)
+        tl.update_idletasks()
+        bx = self.balance_label.winfo_rootx()
+        by = self.balance_label.winfo_rooty() + self.balance_label.winfo_height() + 4
+        tl.geometry(f"+{bx}+{by}")
+        self._tooltip = tl
+
+    def _hide_tooltip(self):
+        if self._tooltip:
+            try:
+                self._tooltip.destroy()
+            except Exception:
+                pass
+            self._tooltip = None
+
+    def _on_balance_enter(self, _event):
+        if self._on_view_curve is None:
+            return
+        if self._tooltip_after:
+            self.after_cancel(self._tooltip_after)
+        self._tooltip_after = self.after(600, lambda: self._show_tooltip("双击查看消耗趋势"))
+
+    def _on_balance_leave(self, _event):
+        if self._tooltip_after:
+            self.after_cancel(self._tooltip_after)
+            self._tooltip_after = None
+        self._hide_tooltip()
 
     def _on_double_click_key(self, _event):
         self.clipboard_clear()
@@ -330,6 +384,7 @@ class MainWindow(ctk.CTk):
         self._settings_callback: Optional[Callable] = None
         self._autostart_callback: Optional[Callable] = None
         self._save_callback: Optional[Callable] = None
+        self._on_view_curve_callback: Optional[Callable] = None
         self._focus_check_id: Optional[str] = None
 
         self.title("DeepSeek 余额监控")
@@ -487,6 +542,7 @@ class MainWindow(ctk.CTk):
                 acc,
                 on_edit=self._on_edit_account,
                 on_delete=self._on_delete_account,
+                on_view_curve=self._on_view_curve_callback,
             )
             row.pack(fill="x", pady=2)
             self._account_rows.append(row)
@@ -556,6 +612,11 @@ class MainWindow(ctk.CTk):
 
     def set_save_callback(self, callback: Callable):
         self._save_callback = callback
+
+    def set_view_curve_callback(self, callback: Callable):
+        self._on_view_curve_callback = callback
+        for row in self._account_rows:
+            row._on_view_curve = callback
 
     def set_status(self, text: str):
         self.status_label.configure(text=text)

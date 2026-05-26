@@ -15,6 +15,10 @@ from main_window import MainWindow
 from floating_window import FloatingWindow
 from instance_lock import InstanceLock
 from animations import AnimationHelper
+from balance_checker import BalanceStatus
+from usage_history import UsageHistory
+from usage_curve_window import BalanceCurveWindow
+from usage_proxy import UsageProxy
 
 ctk.set_default_color_theme("blue")
 
@@ -132,6 +136,10 @@ class App:
 
         self.scheduler = BalanceScheduler(self.config)
         self._active_keys: set[str] = _load_active_keys()
+        self._usage_history = UsageHistory()
+        self._usage_proxy = UsageProxy()
+        self._usage_proxy.start()
+        self._proxy_url = self._usage_proxy.proxy_url
         self.main_window: MainWindow | None = None
         self.floating_window: FloatingWindow | None = None
         self._tray_icon = None
@@ -179,6 +187,7 @@ class App:
         self.main_window.set_settings_callback(self.scheduler.set_settings)
         self.main_window.set_autostart_callback(_set_autostart)
         self.main_window.set_save_callback(lambda: save_config(self.config))
+        self.main_window.set_view_curve_callback(self._on_view_curve)
 
         if self.config.settings.autostart:
             _set_autostart(True)
@@ -190,6 +199,9 @@ class App:
     def _deferred_init(self):
         threading.Thread(target=self._background_init, daemon=True).start()
         self._start_tray()
+        if self.main_window and self.main_window.winfo_exists():
+            proxy_info = f"代理: {self._proxy_url}"
+            self.main_window.set_status(proxy_info)
 
     def _background_init(self):
         self._start_ipc_listener()
@@ -206,8 +218,29 @@ class App:
     def _on_balance_result(self, result: BalanceResult):
         if self._exiting:
             return
+        self._record_balance_snapshot(result)
         if self.main_window and self.main_window.winfo_exists():
             self.main_window.after(0, self._update_ui, result)
+
+    def _record_balance_snapshot(self, result: BalanceResult):
+        if result.info.status != BalanceStatus.OK or not result.info.balances:
+            return
+        acc = next((a for a in self.config.accounts if a.uid == result.uid), None)
+        if not acc:
+            return
+        import hashlib
+        key_hash = hashlib.md5(acc.api_key.encode()).hexdigest()[:16]
+        for b in result.info.balances:
+            try:
+                val = float(b.total_balance)
+            except (ValueError, TypeError):
+                continue
+            self._usage_history.record_balance_snapshot(
+                uid=result.uid,
+                api_key_hash=key_hash,
+                balance=val,
+                currency=b.currency,
+            )
 
     def _update_ui(self, result: BalanceResult):
         if self.main_window:
@@ -218,6 +251,16 @@ class App:
 
         if self.main_window:
             self.main_window.set_status(f"上次更新: {_format_time(self._last_update_time)}")
+
+    def _on_view_curve(self, account):
+        if self.main_window and self.main_window.winfo_exists():
+            BalanceCurveWindow(
+                self.main_window,
+                account_label=account.label,
+                api_key=account.api_key,
+                uid=account.uid,
+                history=self._usage_history,
+            )
 
     def _refresh_floating(self):
         if not self.floating_window or not self.floating_window.winfo_exists():
@@ -346,6 +389,7 @@ class App:
         except Exception:
             pass
 
+        self._usage_proxy.stop()
         self._cleanup_lock()
         os._exit(0)
 
