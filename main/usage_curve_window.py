@@ -186,15 +186,14 @@ class BalanceCurveWindow(ctk.CTkToplevel):
         self._ax = ax
         self._tc = tc
 
-        self._line = None
-        self._fill = None
+        self._line, = ax.plot(times, values, color=COLOR_BALANCE, linewidth=1.5,
+                               marker=".", markersize=3)  # type: ignore[arg-type]
+        self._fill = ax.fill_between(times, values, alpha=0.15, color=COLOR_BALANCE)  # type: ignore[arg-type]
 
         if animate and len(times) > 0:
-            self._animate_draw(0)
+            self._canvas.draw()
+            self._animate_draw()
         else:
-            self._line, = ax.plot(times, values, color=COLOR_BALANCE, linewidth=1.5,
-                                   marker=".", markersize=3)  # type: ignore[arg-type]
-            self._fill = ax.fill_between(times, values, alpha=0.15, color=COLOR_BALANCE)  # type: ignore[arg-type]
             self._canvas.draw()
 
     def _animate_draw(self, _idx: int = 0):
