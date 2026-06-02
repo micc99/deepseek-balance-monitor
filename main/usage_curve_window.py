@@ -49,6 +49,14 @@ def _get_theme_colors():
 
 
 class BalanceCurveWindow(ctk.CTkToplevel):
+    _anim_duration_ms: int = 1000
+    _anim_frame_delay_ms: int = 16
+    _animating: bool = False
+    _anim_timer: Optional[str] = None
+    _anim_x_min: Optional[float] = None
+    _anim_x_max: Optional[float] = None
+    _anim_total_frames: int = 0
+
     def __init__(self, parent, account_label: str, api_key: str, uid: str, history: UsageHistory):
         super().__init__(parent)
         self.title(f"余额趋势 — {account_label}")
@@ -62,8 +70,6 @@ class BalanceCurveWindow(ctk.CTkToplevel):
         self._account_label = account_label
 
         self._canvas: Optional[FigureCanvasTkAgg] = None
-        self._animating = False
-        self._anim_timer: Optional[str] = None
 
         self._setup_ui()
         self._render(animate=True)
@@ -191,42 +197,54 @@ class BalanceCurveWindow(ctk.CTkToplevel):
             self._fill = ax.fill_between(times, values, alpha=0.15, color=COLOR_BALANCE)  # type: ignore[arg-type]
             self._canvas.draw()
 
-    def _animate_draw(self, idx: int):
+    def _animate_draw(self, _idx: int = 0):
         if not self._canvas or not self._ax:
             return
-        if self._animating and idx == 0:
-            self._cancel_animation()
+        if self._animating:
+            return
         self._animating = True
 
         n = len(self._times)
-        if idx >= n:
+        if n < 2:
+            self._animating = False
+            return
+
+        x_data = mdates.date2num(self._times)
+        self._anim_x_min = float(x_data[0])
+        self._anim_x_max = float(x_data[-1])
+        if self._anim_x_max <= self._anim_x_min:
+            self._anim_x_max = self._anim_x_min + 1.0
+
+        self._anim_total_frames = max(1, self._anim_duration_ms // self._anim_frame_delay_ms)
+        self._ax.set_xlim(self._anim_x_min, self._anim_x_min)
+        self._canvas.draw()
+        self._animate_frame(0)
+
+    def _animate_frame(self, frame: int):
+        if not self._canvas or not self._ax or self._anim_x_min is None or self._anim_x_max is None:
             self._animating = False
             self._anim_timer = None
             return
 
-        if self._line is not None:
-            self._line.remove()
-        if self._fill is not None:
-            self._fill.remove()
+        total = self._anim_total_frames
+        progress = (frame + 1) / total
 
-        slice_times = self._times[:idx + 1]
-        slice_values = self._values[:idx + 1]
-
-        self._ax.set_title(f"余额趋势 ({(idx + 1) / n:.0%})", fontsize=13, color=self._tc["title"], pad=8)
-        self._line, = self._ax.plot(slice_times, slice_values, color=COLOR_BALANCE, linewidth=1.5,
-                                     marker=".", markersize=3)  # type: ignore[arg-type]
-        self._fill = self._ax.fill_between(slice_times, slice_values, alpha=0.15, color=COLOR_BALANCE)  # type: ignore[arg-type]
-
-        self._canvas.draw()
-
-        if idx < n - 1:
-            delay = max(2, int(600 / n))
-            self._anim_timer = self.after(delay, lambda: self._animate_draw(idx + 1))
-        else:
-            self._ax.set_title("余额趋势", fontsize=13, color=self._tc["title"], pad=8)
+        if progress >= 1.0:
+            self._ax.set_xlim(self._anim_x_min, self._anim_x_max)
             self._canvas.draw()
             self._animating = False
             self._anim_timer = None
+            return
+
+        eased = 1.0 - (1.0 - progress) ** 2
+        current_x_max = self._anim_x_min + (self._anim_x_max - self._anim_x_min) * eased
+        self._ax.set_xlim(self._anim_x_min, current_x_max)
+        self._canvas.draw()
+
+        self._anim_timer = self.after(
+            self._anim_frame_delay_ms,
+            lambda: self._animate_frame(frame + 1),
+        )
 
     def _cancel_animation(self):
         self._animating = False
