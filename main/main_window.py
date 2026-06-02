@@ -12,14 +12,18 @@ from animations import AnimationHelper
 
 
 class EditAccountDialog(ctk.CTkToplevel):
-    def __init__(self, parent, title: str, account: Optional[AccountConfig] = None, default_label: str = ""):
+    def __init__(self, parent, title: str, account: Optional[AccountConfig] = None, default_label: str = "",
+                 existing_accounts: Optional[list[AccountConfig]] = None, exclude_uid: Optional[str] = None):
         super().__init__(parent)
         self.title(title)
         self.geometry("400x280")
         self.resizable(False, False)
         self.result: Optional[AccountConfig] = None
+        self.duplicate_uid: Optional[str] = None
         self._account = account
         self._default_label = default_label
+        self._existing_accounts = existing_accounts or []
+        self._exclude_uid = exclude_uid
 
         self._label_var = tk.StringVar(value=account.label if account else default_label)
         self._key_var = tk.StringVar(value=account.api_key if account else "")
@@ -71,14 +75,22 @@ class EditAccountDialog(ctk.CTkToplevel):
         key = self._key_var.get().strip()
         if not key:
             return
+        for acc in self._existing_accounts:
+            if acc.uid == self._exclude_uid:
+                continue
+            if acc.api_key == key:
+                self.duplicate_uid = acc.uid
+                self.destroy()
+                return
         self.result = AccountConfig(label=label, api_key=key, provider=self._provider_var.get())
         self.destroy()
 
     @classmethod
-    def show(cls, parent, title: str, account: Optional[AccountConfig] = None, default_label: str = "") -> Optional[AccountConfig]:
-        dlg = cls(parent, title, account, default_label)
+    def show(cls, parent, title: str, account: Optional[AccountConfig] = None, default_label: str = "",
+             existing_accounts: Optional[list[AccountConfig]] = None, exclude_uid: Optional[str] = None):
+        dlg = cls(parent, title, account, default_label, existing_accounts, exclude_uid)
         dlg.wait_window()
-        return dlg.result
+        return dlg.result, dlg.duplicate_uid
 
 
 class AccountRow(ctk.CTkFrame):
@@ -206,6 +218,9 @@ class AccountRow(ctk.CTkFrame):
             self.status_dot.configure(text_color="#ff9800")
             self.balance_label.configure(text="检测中...", text_color="gray")
 
+    def highlight(self, duration_ms=500):
+        AnimationHelper.flash_widget(self, "#fff176", duration_ms)
+
     def _on_double_click_balance(self, _event):
         if self._on_view_curve:
             self._on_view_curve(self.account)
@@ -252,6 +267,12 @@ class AccountRow(ctk.CTkFrame):
             self.after_cancel(self._tooltip_after)
             self._tooltip_after = None
         self._hide_tooltip()
+
+    def set_drag_source(self):
+        self.configure(fg_color=("#d5d5d5", "#3a3a3a"))
+
+    def clear_drag_state(self):
+        self.configure(fg_color="transparent")
 
     def _on_double_click_key(self, _event):
         self.clipboard_clear()
@@ -386,6 +407,13 @@ class MainWindow(ctk.CTk):
         self._save_callback: Optional[Callable] = None
         self._on_view_curve_callback: Optional[Callable] = None
         self._focus_check_id: Optional[str] = None
+
+        self._drag_active = False
+        self._drag_source_idx: Optional[int] = None
+        self._drag_target_idx: Optional[int] = None
+        self._drag_timer_id: Optional[str] = None
+        self._drag_start_y: int = 0
+        self._drag_indicator: Optional[ctk.CTkFrame] = None
 
         self.title("DeepSeek 余额监控")
         self.geometry("700x500")
@@ -535,7 +563,7 @@ class MainWindow(ctk.CTk):
             return
 
         self.empty_label.pack_forget()
-        for acc in self._config.accounts:
+        for idx, acc in enumerate(self._config.accounts):
             row = AccountRow(
                 self.scroll_frame,
                 acc.uid,
@@ -545,11 +573,119 @@ class MainWindow(ctk.CTk):
                 on_view_curve=self._on_view_curve_callback,
             )
             row.pack(fill="x", pady=2)
+            row.key_label.bind("<ButtonPress-1>", lambda e, i=idx: self._on_drag_press(i, e))
+            row.key_label.bind("<B1-Motion>", lambda e: self._on_drag_motion(e))
+            row.key_label.bind("<ButtonRelease-1>", lambda e: self._on_drag_release(e))
             self._account_rows.append(row)
+
+    def _on_drag_press(self, idx: int, event):
+        self._drag_source_idx = idx
+        self._drag_target_idx = idx
+        self._drag_start_y = event.y_root
+        if self._drag_timer_id:
+            self.after_cancel(self._drag_timer_id)
+        self._drag_timer_id = self.after(400, self._activate_drag)
+
+    def _on_drag_motion(self, event):
+        if self._drag_source_idx is None:
+            return
+        dy = abs(event.y_root - self._drag_start_y)
+        if not self._drag_active:
+            if dy >= 5:
+                if self._drag_timer_id:
+                    self.after_cancel(self._drag_timer_id)
+                    self._drag_timer_id = None
+                self._activate_drag()
+            else:
+                return
+        if len(self._account_rows) <= 1:
+            return
+
+        mouse_y = event.y_root
+        new_target = 0
+        min_dist = float("inf")
+        for i, row in enumerate(self._account_rows):
+            try:
+                mid = row.winfo_rooty() + row.winfo_height() / 2
+            except Exception:
+                continue
+            dist = abs(mouse_y - mid)
+            if dist < min_dist:
+                min_dist = dist
+                new_target = i
+
+        if new_target != self._drag_target_idx:
+            self._drag_target_idx = new_target
+            self._update_drag_indicator()
+
+    def _on_drag_release(self, event):
+        if self._drag_timer_id:
+            self.after_cancel(self._drag_timer_id)
+            self._drag_timer_id = None
+        if self._drag_active:
+            self._commit_drag()
+        self._drag_source_idx = None
+        self._drag_target_idx = None
+        self._drag_active = False
+        self._drag_start_y = 0
+        self._hide_drag_indicator()
+
+    def _activate_drag(self):
+        src = self._drag_source_idx
+        if src is None or src >= len(self._account_rows):
+            return
+        self._drag_active = True
+        self._account_rows[src].set_drag_source()
+
+    def _update_drag_indicator(self):
+        self._hide_drag_indicator()
+        tgt = self._drag_target_idx
+        src = self._drag_source_idx
+        if tgt is None or src is None or tgt == src:
+            return
+        if tgt < 0 or tgt >= len(self._account_rows):
+            return
+
+        indicator = ctk.CTkFrame(
+            self._account_rows[tgt].master,
+            height=3,
+            fg_color="#4a9eff",
+            corner_radius=0,
+        )
+        before_row = self._account_rows[tgt]
+        indicator.pack(before=before_row, fill="x", pady=(0, 0))
+        self._drag_indicator = indicator
+
+    def _hide_drag_indicator(self):
+        if self._drag_indicator is not None:
+            try:
+                self._drag_indicator.destroy()
+            except Exception:
+                pass
+            self._drag_indicator = None
+
+    def _commit_drag(self):
+        for row in self._account_rows:
+            row.clear_drag_state()
+        self._hide_drag_indicator()
+
+        src = self._drag_source_idx
+        tgt = self._drag_target_idx
+        if src is not None and tgt is not None and src != tgt and 0 <= src < len(self._config.accounts) and 0 <= tgt < len(self._config.accounts):
+            acc = self._config.accounts.pop(src)
+            self._config.accounts.insert(tgt, acc)
+            self._rebuild_account_list()
+            self._notify_save()
 
     def _on_add_account(self):
         default_label = f"Account {len(self._config.accounts) + 1}"
-        result = EditAccountDialog.show(self, "添加监控账号", default_label=default_label)
+        result, dup_uid = EditAccountDialog.show(
+            self, "添加监控账号", default_label=default_label,
+            existing_accounts=self._config.accounts
+        )
+        if dup_uid:
+            self._highlight_account(dup_uid)
+            return
         if result:
             self._config.accounts.append(result)
             self._rebuild_account_list()
@@ -560,12 +696,24 @@ class MainWindow(ctk.CTk):
         if idx is None:
             return
         acc = self._config.accounts[idx]
-        result = EditAccountDialog.show(self, "编辑账号", acc, default_label=acc.label)
+        result, dup_uid = EditAccountDialog.show(
+            self, "编辑账号", acc, default_label=acc.label,
+            existing_accounts=self._config.accounts, exclude_uid=uid
+        )
+        if dup_uid:
+            self._highlight_account(dup_uid)
+            return
         if result:
             result.uid = uid
             self._config.accounts[idx] = result
             self._rebuild_account_list()
             self._notify_save()
+
+    def _highlight_account(self, uid: str):
+        for row in self._account_rows:
+            if row.uid == uid:
+                row.highlight()
+                break
 
     def _on_delete_account(self, uid: str):
         idx = next((i for i, a in enumerate(self._config.accounts) if a.uid == uid), None)
