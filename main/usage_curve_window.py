@@ -19,7 +19,7 @@ if _CHOSEN_FONT:
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-from matplotlib.ticker import MaxNLocator
+import matplotlib.dates as mdates
 
 from usage_history import UsageHistory, _hash_key
 
@@ -27,9 +27,17 @@ COLOR_BALANCE = "#ce93d8"
 
 TIME_RANGES = [
     ("1小时", 3600, 60),
+    ("7小时", 25200, 300),
     ("24小时", 86400, 300),
     ("7天", 604800, 3600),
 ]
+
+_TIME_FORMATS = {
+    "1小时": "%H:%M",
+    "7小时": "%H:%M",
+    "24小时": "%H:%M",
+    "7天": "%m-%d",
+}
 
 
 def _get_theme_colors():
@@ -53,11 +61,12 @@ class BalanceCurveWindow(ctk.CTkToplevel):
         self._history = history
         self._account_label = account_label
 
-        self._time_range_idx = 1
         self._canvas: Optional[FigureCanvasTkAgg] = None
+        self._animating = False
+        self._anim_timer: Optional[str] = None
 
         self._setup_ui()
-        self._render()
+        self._render(animate=True)
 
         self.grab_set()
         self.lift()
@@ -84,7 +93,7 @@ class BalanceCurveWindow(ctk.CTkToplevel):
             width=100,
         )
         self._range_menu.grid(row=0, column=1, padx=5)
-        self._range_menu.set(range_values[1])
+        self._range_menu.set("24小时")
         self._range_menu.configure(command=self._on_range_change)
 
         self._balance_label = ctk.CTkLabel(
@@ -96,24 +105,26 @@ class BalanceCurveWindow(ctk.CTkToplevel):
         self._balance_label.grid(row=0, column=2, padx=5, sticky="e")
 
     def _on_range_change(self, _choice):
-        self._render()
+        self._render(animate=True)
 
-    def _render(self):
+    def _get_range_params(self):
         now = time.time()
         range_label = self._range_menu.get()
         for _l, duration, bucket in TIME_RANGES:
             if _l == range_label:
-                since = now - duration
-                break
-        else:
-            since = now - 86400
+                return now - duration, range_label
+        return now - 86400, "24小时"
 
+    def _render(self, animate: bool = False):
+        self._cancel_animation()
+        since, range_label = self._get_range_params()
         balance_history = self._history.get_balance_history(self._uid, since)
-        self._draw_chart(balance_history)
+        self._draw_chart(balance_history, range_label, animate)
 
-    def _draw_chart(self, balance_history):
+    def _draw_chart(self, balance_history, range_label: str, animate: bool):
         if self._canvas:
             self._canvas.get_tk_widget().destroy()
+            self._canvas = None
 
         tc = _get_theme_colors()
         fig = Figure(figsize=(9, 5), dpi=100)
@@ -129,22 +140,31 @@ class BalanceCurveWindow(ctk.CTkToplevel):
             ax.set_yticks([])
             for spine in ax.spines.values():
                 spine.set_visible(False)
-        else:
-            times = [datetime.fromtimestamp(b.timestamp) for b in balance_history]
-            values = [b.balance for b in balance_history]
-            currency = balance_history[0].currency
-            symbol = "¥" if currency == "CNY" else "$"
+            fig.tight_layout()
+            self._canvas = FigureCanvasTkAgg(fig, master=self)
+            canvas_widget = self._canvas.get_tk_widget()
+            canvas_widget.grid(row=1, column=0, sticky="nsew", padx=10, pady=(5, 10))
+            self.grid_rowconfigure(1, weight=1)
+            self._canvas.draw()
+            return
 
-            latest = values[-1]
-            self._balance_label.configure(text=f"当前余额: {symbol}{latest:,.4f}")
+        times = [datetime.fromtimestamp(b.timestamp) for b in balance_history]
+        values = [b.balance for b in balance_history]
+        currency = balance_history[0].currency
+        symbol = "¥" if currency == "CNY" else "$"
 
-            ax.plot(times, values, color=COLOR_BALANCE, linewidth=1.5, marker=".", markersize=3)
-            ax.fill_between(times, values, alpha=0.15, color=COLOR_BALANCE)
-            ax.set_title("余额趋势", fontsize=13, color=tc["title"], pad=8)
-            ax.set_ylabel(f"余额 ({symbol})", fontsize=11)
-            ax.set_xlabel("时间", fontsize=11)
-            ax.xaxis.set_major_locator(MaxNLocator(nbins=6))
-            _style_ax(ax, tc)
+        latest = values[-1]
+        self._balance_label.configure(text=f"当前余额: {symbol}{latest:,.4f}")
+
+        fmt = _TIME_FORMATS.get(range_label, "%H:%M")
+        ax.xaxis.set_major_formatter(mdates.DateFormatter(fmt))
+        locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
+        ax.xaxis.set_major_locator(locator)
+
+        ax.set_title("余额趋势", fontsize=13, color=tc["title"], pad=8)
+        ax.set_ylabel(f"余额 ({symbol})", fontsize=11)
+        ax.set_xlabel("时间", fontsize=11)
+        _style_ax(ax, tc)
 
         fig.tight_layout()
 
@@ -153,6 +173,66 @@ class BalanceCurveWindow(ctk.CTkToplevel):
         canvas_widget.grid(row=1, column=0, sticky="nsew", padx=10, pady=(5, 10))
         self.grid_rowconfigure(1, weight=1)
         self._canvas.draw()
+
+        self._times = times
+        self._values = values
+        self._fig = fig
+        self._ax = ax
+        self._tc = tc
+
+        self._line = None
+        self._fill = None
+
+        if animate and len(times) > 0:
+            self._animate_draw(0)
+        else:
+            self._line, = ax.plot(times, values, color=COLOR_BALANCE, linewidth=1.5,
+                                   marker=".", markersize=3)  # type: ignore[arg-type]
+            self._fill = ax.fill_between(times, values, alpha=0.15, color=COLOR_BALANCE)  # type: ignore[arg-type]
+            self._canvas.draw()
+
+    def _animate_draw(self, idx: int):
+        if not self._canvas or not self._ax:
+            return
+        if self._animating and idx == 0:
+            self._cancel_animation()
+        self._animating = True
+
+        n = len(self._times)
+        if idx >= n:
+            self._animating = False
+            self._anim_timer = None
+            return
+
+        if self._line is not None:
+            self._line.remove()
+        if self._fill is not None:
+            self._fill.remove()
+
+        slice_times = self._times[:idx + 1]
+        slice_values = self._values[:idx + 1]
+
+        self._ax.set_title(f"余额趋势 ({(idx + 1) / n:.0%})", fontsize=13, color=self._tc["title"], pad=8)
+        self._line, = self._ax.plot(slice_times, slice_values, color=COLOR_BALANCE, linewidth=1.5,
+                                     marker=".", markersize=3)  # type: ignore[arg-type]
+        self._fill = self._ax.fill_between(slice_times, slice_values, alpha=0.15, color=COLOR_BALANCE)  # type: ignore[arg-type]
+
+        self._canvas.draw()
+
+        if idx < n - 1:
+            delay = max(2, int(600 / n))
+            self._anim_timer = self.after(delay, lambda: self._animate_draw(idx + 1))
+        else:
+            self._ax.set_title("余额趋势", fontsize=13, color=self._tc["title"], pad=8)
+            self._canvas.draw()
+            self._animating = False
+            self._anim_timer = None
+
+    def _cancel_animation(self):
+        self._animating = False
+        if self._anim_timer is not None:
+            self.after_cancel(self._anim_timer)
+            self._anim_timer = None
 
 
 def _style_ax(ax, tc):

@@ -1,3 +1,5 @@
+__version__ = "1.8"
+
 import ctypes
 import json
 import os
@@ -183,6 +185,7 @@ class App:
             on_switch_to_floating=self._show_floating,
             on_apply_theme=self._apply_theme,
         )
+        self.main_window.title(f"DeepSeek 余额监控 v{__version__}")
         self.main_window.set_refresh_callback(self.scheduler.refresh_all_now)
         self.main_window.set_settings_callback(self.scheduler.set_settings)
         self.main_window.set_autostart_callback(_set_autostart)

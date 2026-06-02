@@ -4,4 +4,4 @@ pystray>=0.19.0
 Pillow>=9.0.0
 matplotlib>=3.9.0
 
-#pyinstaller --windowed --icon=deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor v1.6" main.py
+#pyinstaller --windowed --icon=deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor v1.8" main.py
