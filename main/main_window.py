@@ -628,7 +628,6 @@ class MainWindow(ctk.CTk):
             hover_color="#e8edf3",
             corner_radius=GlassTheme.RADIUS_BTN,
             font=ctk.CTkFont(size=14),
-            command=self._on_settings
         )
         GlassSqueeze.bind_ctk_button(self.settings_btn, command=self._on_settings)
         self.settings_btn.grid(row=0, column=4, padx=(4, 12))
