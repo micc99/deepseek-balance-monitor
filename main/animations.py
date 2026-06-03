@@ -211,11 +211,28 @@ class GlassSqueeze:
         Bind glass-squeeze animation to a widget.
         If command is provided, it fires on release.
         base_color/hover_color override the widget's own colors if given.
-        Properly handles mouse enter/leave/press/release to prevent stuck states.
+        Disables CTkButton's built-in hover to prevent state conflicts.
         """
+        # Disable CTkButton's built-in hover to prevent state corruption
+        try:
+            widget.configure(hover=False)
+        except Exception:
+            pass
+
         state = {"pressed": False, "hovering": False, "orig_w": None, "orig_h": None}
 
-        def _get_colors():
+        # Resolve hover color at bind time
+        if hover_color is None:
+            try:
+                hc = widget.cget("hover_color")
+                if isinstance(hc, tuple):
+                    mode = ctk.get_appearance_mode()
+                    hc = hc[0] if mode == "Light" else hc[1]
+                hover_color = hc
+            except Exception:
+                pass
+
+        def _get_color():
             try:
                 fg = widget.cget("fg_color")
                 if isinstance(fg, tuple):
@@ -225,22 +242,9 @@ class GlassSqueeze:
             except Exception:
                 return base_color or "#3a7bd5"
 
-        def _get_hover():
-            if hover_color:
-                return hover_color
+        def _restore_base():
             try:
-                hc = widget.cget("hover_color")
-                if isinstance(hc, tuple):
-                    mode = ctk.get_appearance_mode()
-                    hc = hc[0] if mode == "Light" else hc[1]
-                return hc
-            except Exception:
-                return None
-
-        def _restore_visual():
-            """Restore widget to normal appearance."""
-            try:
-                widget.configure(fg_color=_get_colors())
+                widget.configure(fg_color=_get_color())
             except Exception:
                 pass
             try:
@@ -251,17 +255,23 @@ class GlassSqueeze:
             except Exception:
                 pass
 
+        def _apply_hover():
+            if hover_color:
+                try:
+                    widget.configure(fg_color=hover_color)
+                except Exception:
+                    pass
+
         def _on_press(event):
             if state["pressed"]:
                 return
             state["pressed"] = True
-            # Store original size
             try:
                 state["orig_w"] = widget.cget("width")
                 state["orig_h"] = widget.cget("height")
             except Exception:
                 pass
-            color = _get_colors()
+            color = _get_color()
             darkened = GlassTheme.darken(color, GlassTheme.SQUEEZE_DARKEN)
             try:
                 widget.configure(fg_color=darkened)
@@ -280,37 +290,25 @@ class GlassSqueeze:
                 return
             state["pressed"] = False
 
-            def _do_release():
-                _restore_visual()
+            def _do():
+                _restore_base()
                 if state["hovering"]:
-                    hc = _get_hover()
-                    if hc:
-                        try:
-                            widget.configure(fg_color=hc)
-                        except Exception:
-                            pass
+                    _apply_hover()
 
-            widget.after(GlassTheme.SQUEEZE_DOWN_MS, _do_release)
-
+            widget.after(GlassTheme.SQUEEZE_DOWN_MS, _do)
             if command:
                 widget.after(GlassTheme.SQUEEZE_DOWN_MS + 20, command)
 
         def _on_enter(event):
             state["hovering"] = True
             if not state["pressed"]:
-                hc = _get_hover()
-                if hc:
-                    try:
-                        widget.configure(fg_color=hc)
-                    except Exception:
-                        pass
+                _apply_hover()
 
         def _on_leave(event):
             state["hovering"] = False
             if state["pressed"]:
-                # Mouse left while pressed — cancel press, restore immediately
                 state["pressed"] = False
-            _restore_visual()
+            _restore_base()
 
         widget.bind("<Button-1>", _on_press, add="+")
         widget.bind("<ButtonRelease-1>", _on_release, add="+")
@@ -320,10 +318,27 @@ class GlassSqueeze:
     @staticmethod
     def bind_ctk_button(btn: "ctk.CTkButton", command: Optional[Callable] = None):
         """
-        Optimized binding for CTkButton that preserves original dimensions
-        and handles the full glass-squeeze lifecycle.
-        Properly handles mouse enter/leave/press/release to prevent stuck states.
+        Optimized binding for CTkButton with glass-squeeze animation.
+        Disables CTkButton's built-in hover to prevent state corruption.
+        Handles all visual states: rest → hover → pressed → release.
         """
+        # Disable CTkButton's built-in hover to prevent state conflict
+        try:
+            btn.configure(hover=False)
+        except Exception:
+            pass
+
+        # Resolve hover color at bind time
+        hover_color: Optional[str] = None
+        try:
+            hc = btn.cget("hover_color")
+            if isinstance(hc, tuple):
+                mode = ctk.get_appearance_mode()
+                hc = hc[0] if mode == "Light" else hc[1]
+            hover_color = hc
+        except Exception:
+            pass
+
         state = {"pressed": False, "orig_w": None, "orig_h": None, "hovering": False}
 
         def _get_color():
@@ -336,8 +351,7 @@ class GlassSqueeze:
             except Exception:
                 return GlassTheme.BTN_PRIMARY
 
-        def _restore_visual():
-            """Restore button to normal appearance."""
+        def _restore_base():
             try:
                 btn.configure(fg_color=_get_color())
                 if state["orig_w"]:
@@ -348,16 +362,13 @@ class GlassSqueeze:
                 pass
 
         def _apply_hover():
-            """Apply hover darkening effect."""
-            try:
-                color = _get_color()
-                hover = GlassTheme.darken(color, 15)
-                btn.configure(fg_color=hover)
-            except Exception:
-                pass
+            if hover_color:
+                try:
+                    btn.configure(fg_color=hover_color)
+                except Exception:
+                    pass
 
         def _apply_press():
-            """Apply press darkening + shrink effect."""
             try:
                 color = _get_color()
                 darkened = GlassTheme.darken(color, GlassTheme.SQUEEZE_DARKEN)
@@ -381,12 +392,13 @@ class GlassSqueeze:
             if not state["pressed"]:
                 return
             state["pressed"] = False
-            # Restore after squeeze delay
-            def _do_release():
-                _restore_visual()
+
+            def _do():
+                _restore_base()
                 if state["hovering"]:
                     _apply_hover()
-            btn.after(GlassTheme.SQUEEZE_DOWN_MS, _do_release)
+
+            btn.after(GlassTheme.SQUEEZE_DOWN_MS, _do)
             if command:
                 btn.after(GlassTheme.SQUEEZE_DOWN_MS + 30, command)
 
@@ -398,11 +410,8 @@ class GlassSqueeze:
         def _on_leave(event):
             state["hovering"] = False
             if state["pressed"]:
-                # Mouse left while pressed — cancel press, restore immediately
                 state["pressed"] = False
-                _restore_visual()
-            else:
-                _restore_visual()
+            _restore_base()
 
         btn.bind("<Button-1>", _on_press, add="+")
         btn.bind("<ButtonRelease-1>", _on_release, add="+")
