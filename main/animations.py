@@ -509,7 +509,8 @@ class AcrylicPanel(ctk.CTkFrame):
         # Set acrylic background
         base = GlassTheme.ACRYLIC_LIGHT
         acrylic_color = (*base[:3], opacity)
-        kwargs.setdefault("fg_color", acrylic_color[:3])  # CTk doesn't support alpha in fg_color
+        r, g, b = acrylic_color[:3]
+        kwargs.setdefault("fg_color", f"#{r:02x}{g:02x}{b:02x}")
         kwargs.setdefault("corner_radius", corner_radius)
         kwargs.setdefault("border_width", 1)
         kwargs.setdefault("border_color", "#c8d7eb")
