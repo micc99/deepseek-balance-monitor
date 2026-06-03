@@ -177,7 +177,7 @@ class GradientCanvas(tk.Canvas):
 
     def __init__(self, master, **kwargs):
         kwargs.pop("bg", None)
-        super().__init__(master, highlightthickness=0, bd=0, bg="", **kwargs)
+        super().__init__(master, highlightthickness=0, bd=0, **kwargs)
         self._tk_img: Optional[ImageTk.PhotoImage] = None
         self._img_id: Optional[int] = None
         self.bind("<Configure>", self._on_resize)
@@ -219,7 +219,16 @@ class GlassSqueeze:
         except Exception:
             pass
 
-        state = {"pressed": False, "hovering": False, "orig_w": None, "orig_h": None}
+        # Store original base color at bind time (before any hover/press)
+        if base_color is None:
+            try:
+                bc = widget.cget("fg_color")
+                if isinstance(bc, tuple):
+                    mode = ctk.get_appearance_mode()
+                    bc = bc[0] if mode == "Light" else bc[1]
+                base_color = bc
+            except Exception:
+                base_color = "#3a7bd5"
 
         # Resolve hover color at bind time
         if hover_color is None:
@@ -232,19 +241,11 @@ class GlassSqueeze:
             except Exception:
                 pass
 
-        def _get_color():
-            try:
-                fg = widget.cget("fg_color")
-                if isinstance(fg, tuple):
-                    mode = ctk.get_appearance_mode()
-                    fg = fg[0] if mode == "Light" else fg[1]
-                return base_color or fg
-            except Exception:
-                return base_color or "#3a7bd5"
+        state = {"pressed": False, "hovering": False, "orig_w": None, "orig_h": None}
 
         def _restore_base():
             try:
-                widget.configure(fg_color=_get_color())
+                widget.configure(fg_color=base_color)
             except Exception:
                 pass
             try:
@@ -271,8 +272,7 @@ class GlassSqueeze:
                 state["orig_h"] = widget.cget("height")
             except Exception:
                 pass
-            color = _get_color()
-            darkened = GlassTheme.darken(color, GlassTheme.SQUEEZE_DARKEN)
+            darkened = GlassTheme.darken(base_color or GlassTheme.BTN_PRIMARY, GlassTheme.SQUEEZE_DARKEN)
             try:
                 widget.configure(fg_color=darkened)
             except Exception:
@@ -329,31 +329,32 @@ class GlassSqueeze:
             pass
 
         # Resolve hover color at bind time
-        hover_color: Optional[str] = None
+        _hover_color: Optional[str] = None
         try:
             hc = btn.cget("hover_color")
             if isinstance(hc, tuple):
                 mode = ctk.get_appearance_mode()
                 hc = hc[0] if mode == "Light" else hc[1]
-            hover_color = hc
+            _hover_color = hc
+        except Exception:
+            pass
+
+        # Store original base color at bind time (before any hover/press)
+        _base_color: str = "#3a7bd5"
+        try:
+            bc = btn.cget("fg_color")
+            if isinstance(bc, tuple):
+                mode = ctk.get_appearance_mode()
+                bc = bc[0] if mode == "Light" else bc[1]
+            _base_color = bc
         except Exception:
             pass
 
         state = {"pressed": False, "orig_w": None, "orig_h": None, "hovering": False}
 
-        def _get_color():
-            try:
-                fg = btn.cget("fg_color")
-                if isinstance(fg, tuple):
-                    mode = ctk.get_appearance_mode()
-                    return fg[0] if mode == "Light" else fg[1]
-                return fg
-            except Exception:
-                return GlassTheme.BTN_PRIMARY
-
         def _restore_base():
             try:
-                btn.configure(fg_color=_get_color())
+                btn.configure(fg_color=_base_color)
                 if state["orig_w"]:
                     btn.configure(width=state["orig_w"])
                 if state["orig_h"]:
@@ -362,16 +363,15 @@ class GlassSqueeze:
                 pass
 
         def _apply_hover():
-            if hover_color:
+            if _hover_color:
                 try:
-                    btn.configure(fg_color=hover_color)
+                    btn.configure(fg_color=_hover_color)
                 except Exception:
                     pass
 
         def _apply_press():
             try:
-                color = _get_color()
-                darkened = GlassTheme.darken(color, GlassTheme.SQUEEZE_DARKEN)
+                darkened = GlassTheme.darken(_base_color, GlassTheme.SQUEEZE_DARKEN)
                 btn.configure(fg_color=darkened)
                 if state["orig_w"]:
                     btn.configure(width=int(state["orig_w"] * GlassTheme.SQUEEZE_SCALE))
@@ -561,21 +561,36 @@ class AnimationHelper:
 
 class AcrylicPanel(ctk.CTkFrame):
     """
-    A frame styled to look like a frosted-glass acrylic panel.
-    Renders a semi-transparent background with subtle highlight.
+    A frosted-glass panel rendered via PIL.
+    Draws a semi-transparent acrylic image on a Canvas behind the frame,
+    allowing the gradient background to show through with a glass effect.
     """
 
     def __init__(self, master, corner_radius: int = GlassTheme.RADIUS_PANEL,
-                 opacity: int = 140, **kwargs):
-        # Set acrylic background
-        base = GlassTheme.ACRYLIC_LIGHT
-        acrylic_color = (*base[:3], opacity)
-        r, g, b = acrylic_color[:3]
-        kwargs.setdefault("fg_color", f"#{r:02x}{g:02x}{b:02x}")
+                 **kwargs):
+        kwargs.pop("fg_color", None)
+        self._corner_radius = corner_radius
         kwargs.setdefault("corner_radius", corner_radius)
-        kwargs.setdefault("border_width", 1)
-        kwargs.setdefault("border_color", "#c8d7eb")
-        super().__init__(master, **kwargs)
+        super().__init__(master, fg_color="transparent", **kwargs)
+
+        self._tk_img: Optional[ImageTk.PhotoImage] = None
+        self._img_id: Optional[int] = None
+        self._canvas = tk.Canvas(self, highlightthickness=0, bd=0)
+        self._canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        self.bind("<Configure>", self._on_resize)
+
+    def _on_resize(self, event):
+        w, h = event.width, event.height
+        if w < 10 or h < 10:
+            return
+        img = AcrylicRenderer.render_acrylic_panel(w, h, self._corner_radius)
+        self._tk_img = ImageTk.PhotoImage(img)
+        self._canvas.delete("all")
+        self._canvas.create_image(0, 0, anchor="nw", image=self._tk_img)
+
+    def destroy(self):
+        self._canvas.delete("all")
+        super().destroy()
 
 
 # ─── Glass Card Widget ───────────────────────────────────────────────────────
@@ -586,11 +601,48 @@ class GlassCard(ctk.CTkFrame):
     Represents task cards in the glass UI.
     """
 
-    def __init__(self, master, corner_radius: int = GlassTheme.RADIUS_CARD, **kwargs):
+    def __init__(self, master, corner_radius: int = GlassTheme.RADIUS_CARD,
+                 shadow: bool = False, **kwargs):
         kwargs.setdefault("fg_color", "#ffffff")
         kwargs.setdefault("corner_radius", corner_radius)
         kwargs.setdefault("border_width", 0)
         super().__init__(master, **kwargs)
+        self._shadow_tk: Optional[ImageTk.PhotoImage] = None
+        self._shadow_placed = False
+        if shadow:
+            self.after(50, self._place_shadow)
+
+    def _place_shadow(self):
+        if self._shadow_placed:
+            return
+        self._shadow_placed = True
+        try:
+            w = self.winfo_width()
+            h = self.winfo_height()
+            if w < 10 or h < 10:
+                self.after(100, self._place_shadow)
+                return
+            img = AcrylicRenderer.render_card_shadow(w, h)
+            self._shadow_tk = ImageTk.PhotoImage(img)
+            from PIL import Image as PILImage
+            sw, sh = img.size
+            self._shadow_canvas = tk.Canvas(
+                self.master, highlightthickness=0, bd=0, bg="",
+                width=sw, height=sh
+            )
+            self._shadow_canvas.create_image(0, 0, anchor="nw", image=self._shadow_tk)
+            offset = GlassTheme.SHADOW_OFFSET
+            blur = GlassTheme.SHADOW_BLUR
+            pad = blur * 2
+            x = self.winfo_x() - pad
+            y = self.winfo_y() - pad + offset
+            self._shadow_canvas.place(x=x, y=y)
+            try:
+                self._shadow_canvas.tk.call('lower', self._shadow_canvas._w)  # type: ignore
+            except Exception:
+                pass
+        except Exception:
+            pass
 
 
 # ─── Shorthand factory ───────────────────────────────────────────────────────
