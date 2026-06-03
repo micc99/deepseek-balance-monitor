@@ -1,4 +1,4 @@
-__version__ = "1.8"
+__version__ = "2.0"
 
 import ctypes
 import json
@@ -23,6 +23,8 @@ from usage_curve_window import BalanceCurveWindow
 from usage_proxy import UsageProxy
 
 ctk.set_default_color_theme("blue")
+# Force light mode for acrylic glass design
+ctk.set_appearance_mode("light")
 
 LOCK_NAME = "DeepSeekBalanceMonitor"
 IPC_PORT = 52847
@@ -132,8 +134,9 @@ class App:
         self._last_update_time: float = 0
 
         self.config = load_config()
-        theme = self.config.settings.theme
-        ctk.set_appearance_mode(theme)
+        # Always use light mode for acrylic glass design
+        ctk.set_appearance_mode("light")
+        self.config.settings.theme = "light"
         AnimationHelper.set_ripple_color(self.config.settings.ripple_color)
 
         self.scheduler = BalanceScheduler(self.config)
@@ -214,8 +217,9 @@ class App:
             self.scheduler.refresh_all_now()
 
     def _apply_theme(self, theme: str):
-        ctk.set_appearance_mode(theme)
-        self.config.settings.theme = theme
+        # Acrylic glass design requires light mode
+        ctk.set_appearance_mode("light")
+        self.config.settings.theme = "light"
         save_config(self.config)
 
     def _on_balance_result(self, result: BalanceResult):

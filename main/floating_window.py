@@ -6,7 +6,7 @@ from typing import Callable, Optional
 import customtkinter as ctk
 
 from config import WindowConfig
-from animations import AnimationHelper
+from animations import AnimationHelper, GlassTheme
 
 
 class FloatingWindow(ctk.CTkToplevel):
@@ -23,40 +23,52 @@ class FloatingWindow(ctk.CTkToplevel):
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.resizable(False, False)
-        self.geometry("260x120")
+        self.geometry("280x130")
 
         self._setup_ui()
         self._bind_drag()
         AnimationHelper.fade_in(self, 300)
 
     def _setup_ui(self):
-        self.configure(fg_color=("gray95", "gray17"))
+        # Outer shell with gradient-like background
+        self.configure(fg_color="#e8f0fa")
 
-        self._outer = ctk.CTkFrame(self, fg_color=("gray90", "gray20"), corner_radius=12)
-        self._outer.pack(fill="both", expand=True, padx=3, pady=3)
+        # Acrylic frosted panel
+        self._outer = ctk.CTkFrame(
+            self,
+            fg_color="#ffffff",
+            corner_radius=14,
+            border_width=1,
+            border_color="#c8d7eb",
+        )
+        self._outer.pack(fill="both", expand=True, padx=4, pady=4)
 
+        # Title with glass style
         self._title_label = ctk.CTkLabel(
             self._outer,
             text="余额监控",
             font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="gray",
+            text_color=GlassTheme.TEXT_SECONDARY,
         )
-        self._title_label.pack(pady=(8, 2))
+        self._title_label.pack(pady=(10, 2))
 
+        # Balance display - prominent
         self._balance_label = ctk.CTkLabel(
             self._outer,
             text="暂无数据",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            font=ctk.CTkFont(size=19, weight="bold"),
+            text_color=GlassTheme.TEXT_PRIMARY,
         )
         self._balance_label.pack(pady=(0, 4))
 
+        # Status line
         self._status_label = ctk.CTkLabel(
             self._outer,
             text="0 个账号 | 就绪",
             font=ctk.CTkFont(size=11),
-            text_color="gray",
+            text_color=GlassTheme.TEXT_MUTED,
         )
-        self._status_label.pack()
+        self._status_label.pack(pady=(0, 8))
 
     def _bind_drag(self):
         self._outer.bind("<Button-1>", self._on_drag_start)
@@ -95,7 +107,7 @@ class FloatingWindow(ctk.CTkToplevel):
             AnimationHelper.fade_out(self, 300, callback=_restore)
 
     def _on_right_click(self, event):
-        menu = tk.Menu(self, tearoff=0)
+        menu = tk.Menu(self, tearoff=0, font=("Microsoft YaHei", 10))
         if self._on_refresh:
             menu.add_command(label="立即刷新", command=self._on_refresh)
         menu.add_separator()

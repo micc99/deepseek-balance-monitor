@@ -8,15 +8,20 @@ import customtkinter as ctk
 from config import AppConfig, AccountConfig, mask_api_key
 from balance_checker import BalanceInfo, BalanceStatus, PROVIDERS
 from scheduler import BalanceResult
-from animations import AnimationHelper
+from animations import (
+    AnimationHelper, GlassSqueeze, GlassTheme, AcrylicPanel,
+    GlassCard, GradientCanvas, create_glass_button,
+)
 
+
+# ─── Edit Account Dialog (glass-themed) ──────────────────────────────────────
 
 class EditAccountDialog(ctk.CTkToplevel):
     def __init__(self, parent, title: str, account: Optional[AccountConfig] = None, default_label: str = "",
                  existing_accounts: Optional[list[AccountConfig]] = None, exclude_uid: Optional[str] = None):
         super().__init__(parent)
         self.title(title)
-        self.geometry("400x280")
+        self.geometry("420x320")
         self.resizable(False, False)
         self.result: Optional[AccountConfig] = None
         self.duplicate_uid: Optional[str] = None
@@ -29,19 +34,46 @@ class EditAccountDialog(ctk.CTkToplevel):
         self._key_var = tk.StringVar(value=account.api_key if account else "")
         self._provider_var = tk.StringVar(value=account.provider if account else "deepseek")
 
+        self.configure(fg_color="#f0f4f9")
         self._setup_ui()
         self.grab_set()
         self.lift()
 
     def _setup_ui(self):
-        ctk.CTkLabel(self, text="标签名称", font=ctk.CTkFont(size=13)).pack(pady=(20, 0))
-        ctk.CTkEntry(self, textvariable=self._label_var, width=300).pack(pady=(5, 10))
+        # Main container with acrylic styling
+        container = ctk.CTkFrame(
+            self, fg_color="#ffffff", corner_radius=16,
+            border_width=1, border_color="#d0dbe8"
+        )
+        container.pack(fill="both", expand=True, padx=12, pady=12)
 
-        ctk.CTkLabel(self, text="API Key", font=ctk.CTkFont(size=13)).pack()
-        key_entry = ctk.CTkEntry(self, textvariable=self._key_var, width=300)
-        key_entry.pack(pady=(5, 10))
+        ctk.CTkLabel(
+            container, text="标签名称",
+            font=ctk.CTkFont(size=12, weight="normal"),
+            text_color=GlassTheme.TEXT_SECONDARY
+        ).pack(pady=(18, 0), padx=24, anchor="w")
+        ctk.CTkEntry(
+            container, textvariable=self._label_var, width=320,
+            corner_radius=8, border_width=1, border_color="#d0dbe8",
+            fg_color="#f8fafb"
+        ).pack(pady=(4, 8), padx=24)
 
-        ctk.CTkLabel(self, text="服务商", font=ctk.CTkFont(size=13)).pack()
+        ctk.CTkLabel(
+            container, text="API Key",
+            font=ctk.CTkFont(size=12, weight="normal"),
+            text_color=GlassTheme.TEXT_SECONDARY
+        ).pack(padx=24, anchor="w")
+        ctk.CTkEntry(
+            container, textvariable=self._key_var, width=320,
+            corner_radius=8, border_width=1, border_color="#d0dbe8",
+            fg_color="#f8fafb"
+        ).pack(pady=(4, 8), padx=24)
+
+        ctk.CTkLabel(
+            container, text="服务商",
+            font=ctk.CTkFont(size=12, weight="normal"),
+            text_color=GlassTheme.TEXT_SECONDARY
+        ).pack(padx=24, anchor="w")
         provider_names = [f"{p.label} ({p.description})" for p in PROVIDERS.values()]
         provider_keys = list(PROVIDERS.keys())
         self._provider_names = provider_names
@@ -52,23 +84,38 @@ class EditAccountDialog(ctk.CTkToplevel):
             self._provider_var.set(provider_keys[idx])
 
         provider_menu = ctk.CTkOptionMenu(
-            self, values=provider_names, command=_on_provider_select
+            container, values=provider_names, command=_on_provider_select,
+            width=200, corner_radius=8,
+            fg_color=GlassTheme.BTN_PRIMARY,
+            button_color=GlassTheme.BTN_PRIMARY,
+            button_hover_color=GlassTheme.BTN_PRIMARY_HOVER,
         )
-        provider_menu.pack(pady=(5, 15))
+        provider_menu.pack(pady=(4, 12), padx=24, anchor="w")
 
         default_key = self._account.provider if self._account else "deepseek"
         if default_key in provider_keys:
             idx = provider_keys.index(default_key)
             provider_menu.set(provider_names[idx])
 
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack()
-        ctk.CTkButton(btn_frame, text="保存", width=100, command=self._on_save).pack(
-            side="left", padx=5
+        btn_frame = ctk.CTkFrame(container, fg_color="transparent")
+        btn_frame.pack(pady=(4, 16))
+
+        save_btn = create_glass_button(
+            btn_frame, text="保存", width=100, height=34, command=self._on_save
         )
-        ctk.CTkButton(
-            btn_frame, text="取消", width=100, fg_color="gray", command=self.destroy
-        ).pack(side="left", padx=5)
+        save_btn.pack(side="left", padx=6)
+
+        cancel_btn = ctk.CTkButton(
+            btn_frame, text="取消", width=100, height=34,
+            fg_color=GlassTheme.BTN_SECONDARY,
+            text_color=GlassTheme.TEXT_PRIMARY,
+            hover_color=GlassTheme.BTN_SECONDARY_HOVER,
+            corner_radius=GlassTheme.RADIUS_BTN,
+            font=ctk.CTkFont(size=13),
+            command=self.destroy
+        )
+        cancel_btn.pack(side="left", padx=6)
+        GlassSqueeze.bind_ctk_button(cancel_btn)
 
     def _on_save(self):
         label = self._label_var.get().strip() or self._default_label
@@ -93,6 +140,8 @@ class EditAccountDialog(ctk.CTkToplevel):
         return dlg.result, dlg.duplicate_uid
 
 
+# ─── Account Row (glass card style) ──────────────────────────────────────────
+
 class AccountRow(ctk.CTkFrame):
     def __init__(
         self,
@@ -103,7 +152,8 @@ class AccountRow(ctk.CTkFrame):
         on_delete: Callable,
         on_view_curve: Optional[Callable] = None,
     ):
-        super().__init__(master, fg_color="transparent")
+        super().__init__(master, fg_color="#ffffff", corner_radius=10,
+                         border_width=0)
         self.uid = uid
         self.account = account
         self._on_edit = on_edit
@@ -121,31 +171,28 @@ class AccountRow(ctk.CTkFrame):
         self.columnconfigure(3, weight=2)
         self.columnconfigure(4, weight=0)
 
-        appearance = ctk.get_appearance_mode()
-        label_text_color = "black" if appearance == "Light" else "white"
-
         self.label_btn = ctk.CTkButton(
             self,
             text=self.account.label,
             fg_color="transparent",
             font=ctk.CTkFont(size=13, weight="bold"),
             anchor="w",
-            text_color=label_text_color,
-            hover_color=("gray80", "gray30"),
+            text_color=GlassTheme.TEXT_PRIMARY,
+            hover_color=("#e8edf3", "#e8edf3"),
         )
-        self.label_btn.grid(row=0, column=0, sticky="ew", padx=(5, 2), pady=4)
-        AnimationHelper.bind_ripple(self.label_btn, lambda u=self.account.uid: self._on_edit(u))
+        self.label_btn.grid(row=0, column=0, sticky="ew", padx=(8, 2), pady=6)
+        GlassSqueeze.bind(self.label_btn, command=lambda u=self.account.uid: self._on_edit(u))
 
         key_text = mask_api_key(self.account.api_key)
         self.key_label = ctk.CTkLabel(
             self,
             text=key_text,
-            font=ctk.CTkFont(size=12),
-            text_color="gray",
+            font=ctk.CTkFont(size=11),
+            text_color=GlassTheme.TEXT_MUTED,
             anchor="w",
         )
         self.key_label.bind("<Double-Button-1>", self._on_double_click_key)
-        self.key_label.grid(row=0, column=1, sticky="ew", padx=2, pady=4)
+        self.key_label.grid(row=0, column=1, sticky="ew", padx=2, pady=6)
 
         provider_label_text = PROVIDERS.get(self.account.provider, None)
         provider_text = provider_label_text.label if provider_label_text else self.account.provider
@@ -153,18 +200,19 @@ class AccountRow(ctk.CTkFrame):
             self,
             text=provider_text,
             font=ctk.CTkFont(size=11),
-            text_color=("gray50", "gray60"),
+            text_color=GlassTheme.TEXT_SECONDARY,
             anchor="w",
         )
-        self.provider_label.grid(row=0, column=2, sticky="ew", padx=2, pady=4)
+        self.provider_label.grid(row=0, column=2, sticky="ew", padx=2, pady=6)
 
         self.balance_label = ctk.CTkLabel(
             self,
             text="检测中...",
-            font=ctk.CTkFont(size=14),
+            font=ctk.CTkFont(size=13),
+            text_color=GlassTheme.TEXT_MUTED,
             anchor="w",
         )
-        self.balance_label.grid(row=0, column=3, sticky="ew", padx=2, pady=4)
+        self.balance_label.grid(row=0, column=3, sticky="ew", padx=2, pady=6)
         self.balance_label.bind("<Double-Button-1>", self._on_double_click_balance)
         self.balance_label.bind("<Enter>", self._on_balance_enter, add="+")
         self.balance_label.bind("<Leave>", self._on_balance_leave, add="+")
@@ -172,54 +220,55 @@ class AccountRow(ctk.CTkFrame):
         self.status_dot = ctk.CTkLabel(
             self,
             text="●",
-            font=ctk.CTkFont(size=18),
+            font=ctk.CTkFont(size=16),
             width=25,
-            text_color="gray",
+            text_color=GlassTheme.STATUS_LOADING,
         )
-        self.status_dot.grid(row=0, column=4, padx=(2, 5), pady=4)
+        self.status_dot.grid(row=0, column=4, padx=(2, 5), pady=6)
 
         del_btn = ctk.CTkButton(
             self,
             text="✕",
-            width=30,
-            height=28,
+            width=28,
+            height=26,
             fg_color="transparent",
-            hover_color=("#e57373", "#c62828"),
-            text_color=("gray50", "gray70"),
+            hover_color=("#ffebee", "#ffebee"),
+            text_color=GlassTheme.TEXT_MUTED,
+            corner_radius=6,
         )
-        del_btn.grid(row=0, column=5, padx=(0, 5), pady=4)
-        AnimationHelper.bind_ripple(del_btn, lambda u=self.account.uid: self._on_delete(u))
+        del_btn.grid(row=0, column=5, padx=(0, 8), pady=6)
+        GlassSqueeze.bind(del_btn, command=lambda u=self.account.uid: self._on_delete(u))
 
     def update_balance(self, result: BalanceResult):
         if self.uid != result.uid:
             return
         info = result.info
         if info.status == BalanceStatus.OK:
-            self.status_dot.configure(text_color="#4caf50")
+            self.status_dot.configure(text_color=GlassTheme.STATUS_OK)
             display = info.total_display
             if not info.is_available:
                 display += " ⚠"
-                self.status_dot.configure(text_color="#ff9800")
+                self.status_dot.configure(text_color=GlassTheme.STATUS_WARN)
             if display != self._prev_balance:
                 self.balance_label.configure(
                     text=display,
-                    text_color="#ff9800" if not info.is_available else ("#1b5e20", "#69f0ae"),
+                    text_color=GlassTheme.STATUS_WARN if not info.is_available else GlassTheme.STATUS_OK,
                 )
                 self._prev_balance = display
-                AnimationHelper.flash_widget(self, "#1a3a5a", 500)
+                AnimationHelper.flash_widget(self, "#e8f0fe", 500)
         elif info.status == BalanceStatus.ERROR:
-            self.status_dot.configure(text_color="#f44336")
+            self.status_dot.configure(text_color=GlassTheme.STATUS_ERROR)
             self.balance_label.configure(
                 text=info.error_message or "错误",
-                text_color="#f44336",
+                text_color=GlassTheme.STATUS_ERROR,
             )
             self._prev_balance = ""
         elif info.status == BalanceStatus.LOADING:
-            self.status_dot.configure(text_color="#ff9800")
-            self.balance_label.configure(text="检测中...", text_color="gray")
+            self.status_dot.configure(text_color=GlassTheme.STATUS_LOADING)
+            self.balance_label.configure(text="检测中...", text_color=GlassTheme.TEXT_MUTED)
 
     def highlight(self, duration_ms=500):
-        AnimationHelper.flash_widget(self, "#fff176", duration_ms)
+        AnimationHelper.flash_widget(self, "#fff9c4", duration_ms)
 
     def _on_double_click_balance(self, _event):
         if self._on_view_curve:
@@ -233,14 +282,14 @@ class AccountRow(ctk.CTkFrame):
         tl.overrideredirect(True)
         tl.attributes("-topmost", True)
         tl.resizable(False, False)
-        frame = ctk.CTkFrame(tl, corner_radius=6, fg_color=("gray20", "gray30"))
+        frame = ctk.CTkFrame(tl, corner_radius=8, fg_color="#1a2a3a")
         frame.pack(fill="both", expand=True, padx=2, pady=2)
         ctk.CTkLabel(
             frame,
             text=text,
             font=ctk.CTkFont(size=11),
-            text_color=("#ffffff", "#ffffff"),
-        ).pack(padx=8, pady=4)
+            text_color="#ffffff",
+        ).pack(padx=10, pady=5)
         tl.update_idletasks()
         bx = self.balance_label.winfo_rootx()
         by = self.balance_label.winfo_rooty() + self.balance_label.winfo_height() + 4
@@ -269,10 +318,10 @@ class AccountRow(ctk.CTkFrame):
         self._hide_tooltip()
 
     def set_drag_source(self):
-        self.configure(fg_color=("#d5d5d5", "#3a3a3a"))
+        self.configure(fg_color="#e3eaf2")
 
     def clear_drag_state(self):
-        self.configure(fg_color="transparent")
+        self.configure(fg_color="#ffffff")
 
     def _on_double_click_key(self, _event):
         self.clipboard_clear()
@@ -286,14 +335,14 @@ class AccountRow(ctk.CTkFrame):
         toast.attributes("-topmost", True)
         toast.resizable(False, False)
 
-        frame = ctk.CTkFrame(toast, corner_radius=10, fg_color=("gray30", "gray30"))
+        frame = ctk.CTkFrame(toast, corner_radius=10, fg_color="#1a2a3a")
         frame.pack(fill="both", expand=True, padx=2, pady=2)
         ctk.CTkLabel(
             frame,
             text="已复制 API Key",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color=("#ffffff", "#ffffff"),
-        ).pack(padx=24, pady=12)
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#ffffff",
+        ).pack(padx=20, pady=10)
 
         toast.update_idletasks()
         tw = toast.winfo_width()
@@ -303,6 +352,8 @@ class AccountRow(ctk.CTkFrame):
         toast.geometry(f"+{p_x}+{p_y}")
         toast.after(1500, toast.destroy)
 
+
+# ─── Settings Dialog (glass-themed) ──────────────────────────────────────────
 
 class SettingsDialog(ctk.CTkToplevel):
     RIPPLE_COLORS = {
@@ -317,7 +368,7 @@ class SettingsDialog(ctk.CTkToplevel):
     def __init__(self, parent, interval_sec: int, autostart: bool, theme: str = "dark", ripple_color: str = "#aaddff"):
         super().__init__(parent)
         self.title("设置")
-        self.geometry("360x400")
+        self.geometry("380x420")
         self.resizable(False, False)
         self.result = None
 
@@ -329,49 +380,101 @@ class SettingsDialog(ctk.CTkToplevel):
         current_ripple_name = reverse_colors.get(ripple_color, "淡蓝色")
         self._ripple_var = tk.StringVar(value=current_ripple_name)
 
+        self.configure(fg_color="#f0f4f9")
         self._setup_ui()
         self.grab_set()
         self.lift()
 
     def _setup_ui(self):
-        ctk.CTkLabel(self, text="自动刷新间隔（秒）", font=ctk.CTkFont(size=14)).pack(pady=(20, 5))
-        ctk.CTkLabel(self, text="最少 10 秒，推荐 60 秒", font=ctk.CTkFont(size=11), text_color="gray").pack()
+        container = ctk.CTkFrame(
+            self, fg_color="#ffffff", corner_radius=16,
+            border_width=1, border_color="#d0dbe8"
+        )
+        container.pack(fill="both", expand=True, padx=12, pady=12)
 
-        entry_frame = ctk.CTkFrame(self, fg_color="transparent")
-        entry_frame.pack(pady=(10, 15))
-        entry = ctk.CTkEntry(entry_frame, textvariable=self._interval_var, width=120, justify="center")
-        entry.pack(side="left", padx=5)
-        ctk.CTkLabel(entry_frame, text="秒", font=ctk.CTkFont(size=13)).pack(side="left")
+        ctk.CTkLabel(
+            container, text="自动刷新间隔（秒）",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=GlassTheme.TEXT_PRIMARY
+        ).pack(pady=(18, 2), padx=24, anchor="w")
+        ctk.CTkLabel(
+            container, text="最少 10 秒，推荐 60 秒",
+            font=ctk.CTkFont(size=11),
+            text_color=GlassTheme.TEXT_MUTED
+        ).pack(padx=24, anchor="w")
 
-        ctk.CTkLabel(self, text="主题", font=ctk.CTkFont(size=14)).pack(pady=(0, 5))
-        theme_menu = ctk.CTkOptionMenu(
-            self,
+        entry_frame = ctk.CTkFrame(container, fg_color="transparent")
+        entry_frame.pack(pady=(8, 12), padx=24, anchor="w")
+        ctk.CTkEntry(
+            entry_frame, textvariable=self._interval_var, width=100,
+            justify="center", corner_radius=8, border_width=1, border_color="#d0dbe8",
+            fg_color="#f8fafb"
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(
+            entry_frame, text="秒",
+            font=ctk.CTkFont(size=12),
+            text_color=GlassTheme.TEXT_SECONDARY
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            container, text="主题",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=GlassTheme.TEXT_PRIMARY
+        ).pack(pady=(8, 2), padx=24, anchor="w")
+        ctk.CTkOptionMenu(
+            container,
             values=["暗黑模式", "白色模式"],
             variable=self._theme_var,
-            width=150
-        )
-        theme_menu.pack(pady=(0, 10))
+            width=160, corner_radius=8,
+            fg_color=GlassTheme.BTN_PRIMARY,
+            button_color=GlassTheme.BTN_PRIMARY,
+            button_hover_color=GlassTheme.BTN_PRIMARY_HOVER,
+        ).pack(pady=(4, 12), padx=24, anchor="w")
 
-        ctk.CTkLabel(self, text="波纹颜色", font=ctk.CTkFont(size=14)).pack(pady=(0, 5))
-        ripple_menu = ctk.CTkOptionMenu(
-            self,
+        ctk.CTkLabel(
+            container, text="波纹颜色",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=GlassTheme.TEXT_PRIMARY
+        ).pack(pady=(0, 2), padx=24, anchor="w")
+        ctk.CTkOptionMenu(
+            container,
             values=list(self.RIPPLE_COLORS.keys()),
             variable=self._ripple_var,
-            width=150
-        )
-        ripple_menu.pack(pady=(0, 10))
+            width=160, corner_radius=8,
+            fg_color=GlassTheme.BTN_PRIMARY,
+            button_color=GlassTheme.BTN_PRIMARY,
+            button_hover_color=GlassTheme.BTN_PRIMARY_HOVER,
+        ).pack(pady=(4, 12), padx=24, anchor="w")
 
-        autostart_frame = ctk.CTkFrame(self, fg_color="transparent")
-        autostart_frame.pack(pady=(0, 15))
-        self._autostart_cb = ctk.CTkCheckBox(
-            autostart_frame, text="开机自动启动", variable=self._autostart_var
-        )
-        self._autostart_cb.pack()
+        ctk.CTkCheckBox(
+            container, text="开机自动启动",
+            variable=self._autostart_var,
+            font=ctk.CTkFont(size=12),
+            text_color=GlassTheme.TEXT_PRIMARY,
+            hover_color=GlassTheme.BTN_PRIMARY,
+            checkcolor=GlassTheme.BTN_PRIMARY,
+            border_color="#c0ccd8",
+        ).pack(pady=(0, 14), padx=24, anchor="w")
 
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack()
-        ctk.CTkButton(btn_frame, text="保存", width=100, command=self._on_save).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="取消", width=100, fg_color="gray", command=self.destroy).pack(side="left", padx=5)
+        btn_frame = ctk.CTkFrame(container, fg_color="transparent")
+        btn_frame.pack(pady=(4, 16))
+
+        save_btn = create_glass_button(
+            btn_frame, text="保存", width=100, height=34, command=self._on_save
+        )
+        save_btn.pack(side="left", padx=6)
+
+        cancel_btn = ctk.CTkButton(
+            btn_frame, text="取消", width=100, height=34,
+            fg_color=GlassTheme.BTN_SECONDARY,
+            text_color=GlassTheme.TEXT_PRIMARY,
+            hover_color=GlassTheme.BTN_SECONDARY_HOVER,
+            corner_radius=GlassTheme.RADIUS_BTN,
+            font=ctk.CTkFont(size=13),
+            command=self.destroy
+        )
+        cancel_btn.pack(side="left", padx=6)
+        GlassSqueeze.bind_ctk_button(cancel_btn)
 
     def _on_save(self):
         try:
@@ -389,6 +492,8 @@ class SettingsDialog(ctk.CTkToplevel):
         dlg.wait_window()
         return dlg.result
 
+
+# ─── Main Window (Acrylic Glass Design) ──────────────────────────────────────
 
 class MainWindow(ctk.CTk):
     CLOSE_ACTION_HIDE = "hide"
@@ -416,8 +521,11 @@ class MainWindow(ctk.CTk):
         self._drag_indicator: Optional[ctk.CTkFrame] = None
 
         self.title("DeepSeek 余额监控")
-        self.geometry("700x500")
-        self.minsize(550, 350)
+        self.geometry("720x520")
+        self.minsize(580, 380)
+
+        # Light glass background
+        self.configure(fg_color="#f0f4f9")
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Unmap>", self._on_minimize)
@@ -479,67 +587,80 @@ class MainWindow(ctk.CTk):
         self.grid_rowconfigure(1, weight=1)
         self.grid_rowconfigure(2, weight=0)
 
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=15, pady=(15, 5))
+        # ── Header: acrylic panel ──
+        header = AcrylicPanel(self, corner_radius=14)
+        header.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
         header.grid_columnconfigure(1, weight=1)
 
         title_label = ctk.CTkLabel(
             header,
             text="DeepSeek 余额监控",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            font=ctk.CTkFont(size=17, weight="bold"),
+            text_color=GlassTheme.TEXT_PRIMARY,
         )
-        title_label.grid(row=0, column=0, padx=(0, 15))
+        title_label.grid(row=0, column=0, padx=(14, 12), pady=10)
 
-        self.add_btn = ctk.CTkButton(
-            header, text="+ 添加账号", width=110, command=self._on_add_account
+        self.add_btn = create_glass_button(
+            header, text="＋ 添加账号", width=105, height=30,
+            fg_color=GlassTheme.BTN_PRIMARY, command=self._on_add_account
         )
-        self.add_btn.grid(row=0, column=1, padx=5, sticky="e")
+        self.add_btn.grid(row=0, column=1, padx=4, sticky="e")
 
-        self.refresh_btn = ctk.CTkButton(
-            header, text="立即刷新", width=90, fg_color="gray"
+        self.refresh_btn = create_glass_button(
+            header, text="刷新", width=70, height=30,
+            fg_color=GlassTheme.BTN_SECONDARY, text_color=GlassTheme.TEXT_PRIMARY,
+            hover_color=GlassTheme.BTN_SECONDARY_HOVER,
+            command=self._on_manual_refresh
         )
-        self.refresh_btn.grid(row=0, column=2, padx=5)
-        AnimationHelper.bind_ripple(self.refresh_btn, self._on_manual_refresh)
+        self.refresh_btn.grid(row=0, column=2, padx=4)
 
-        self.float_btn = ctk.CTkButton(
-            header,
-            text="最小化到悬浮窗",
-            width=130,
-            fg_color="gray",
+        self.float_btn = create_glass_button(
+            header, text="最小化", width=80, height=30,
+            fg_color=GlassTheme.BTN_SECONDARY, text_color=GlassTheme.TEXT_PRIMARY,
+            hover_color=GlassTheme.BTN_SECONDARY_HOVER,
+            command=self._on_minimize_to_floating
         )
-        self.float_btn.grid(row=0, column=3, padx=5)
-        AnimationHelper.bind_ripple(self.float_btn, self._on_minimize_to_floating)
+        self.float_btn.grid(row=0, column=3, padx=4)
 
         self.settings_btn = ctk.CTkButton(
-            header,
-            text="设置",
-            width=60,
-            fg_color="transparent",
-            hover_color=("gray80", "gray30"),
-            command=self._on_settings,
+            header, text="⚙", width=36, height=30,
+            fg_color="transparent", text_color=GlassTheme.TEXT_SECONDARY,
+            hover_color="#e8edf3",
+            corner_radius=GlassTheme.RADIUS_BTN,
+            font=ctk.CTkFont(size=14),
+            command=self._on_settings
         )
-        self.settings_btn.grid(row=0, column=4, padx=5)
+        GlassSqueeze.bind_ctk_button(self.settings_btn, command=self._on_settings)
+        self.settings_btn.grid(row=0, column=4, padx=(4, 12))
 
-        self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self.scroll_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=5)
+        # ── Content area: acrylic panel with scrollable cards ──
+        content_panel = AcrylicPanel(self, corner_radius=14)
+        content_panel.grid(row=1, column=0, sticky="nsew", padx=12, pady=6)
+        content_panel.grid_columnconfigure(0, weight=1)
+        content_panel.grid_rowconfigure(0, weight=1)
+
+        self.scroll_frame = ctk.CTkScrollableFrame(
+            content_panel, fg_color="transparent"
+        )
+        self.scroll_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         self.scroll_frame.grid_columnconfigure(0, weight=1)
-        AnimationHelper.bind_ripple(self.scroll_frame)
 
         self.empty_label = ctk.CTkLabel(
             self.scroll_frame,
-            text="暂无监控账号\n点击「+ 添加账号」开始",
-            font=ctk.CTkFont(size=14),
-            text_color="gray",
+            text="暂无监控账号\n点击「＋ 添加账号」开始",
+            font=ctk.CTkFont(size=13),
+            text_color=GlassTheme.TEXT_MUTED,
         )
 
+        # ── Footer: status bar ──
         footer = ctk.CTkFrame(self, fg_color="transparent")
-        footer.grid(row=2, column=0, sticky="ew", padx=15, pady=(5, 10))
+        footer.grid(row=2, column=0, sticky="ew", padx=14, pady=(4, 10))
 
         self.status_label = ctk.CTkLabel(
             footer,
             text="就绪",
             font=ctk.CTkFont(size=11),
-            text_color="gray",
+            text_color=GlassTheme.TEXT_MUTED,
         )
         self.status_label.pack(side="left")
 
@@ -547,7 +668,7 @@ class MainWindow(ctk.CTk):
             footer,
             text="",
             font=ctk.CTkFont(size=11),
-            text_color="gray",
+            text_color=GlassTheme.TEXT_MUTED,
         )
         self.interval_label.pack(side="right")
         self.interval_label.bind("<Double-Button-1>", self._on_interval_double_click)
@@ -572,7 +693,7 @@ class MainWindow(ctk.CTk):
                 on_delete=self._on_delete_account,
                 on_view_curve=self._on_view_curve_callback,
             )
-            row.pack(fill="x", pady=2)
+            row.pack(fill="x", pady=3, padx=2)
             row.key_label.bind("<ButtonPress-1>", lambda e, i=idx: self._on_drag_press(i, e))
             row.key_label.bind("<B1-Motion>", lambda e: self._on_drag_motion(e))
             row.key_label.bind("<ButtonRelease-1>", lambda e: self._on_drag_release(e))
@@ -649,7 +770,7 @@ class MainWindow(ctk.CTk):
         indicator = ctk.CTkFrame(
             self._account_rows[tgt].master,
             height=3,
-            fg_color="#4a9eff",
+            fg_color=GlassTheme.BTN_PRIMARY,
             corner_radius=0,
         )
         before_row = self._account_rows[tgt]
