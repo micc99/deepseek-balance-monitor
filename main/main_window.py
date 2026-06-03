@@ -452,7 +452,7 @@ class SettingsDialog(ctk.CTkToplevel):
             font=ctk.CTkFont(size=12),
             text_color=GlassTheme.TEXT_PRIMARY,
             hover_color=GlassTheme.BTN_PRIMARY,
-            checkcolor=GlassTheme.BTN_PRIMARY,
+            fg_color=GlassTheme.BTN_PRIMARY,
             border_color="#c0ccd8",
         ).pack(pady=(0, 14), padx=24, anchor="w")
 

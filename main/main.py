@@ -217,9 +217,8 @@ class App:
             self.scheduler.refresh_all_now()
 
     def _apply_theme(self, theme: str):
-        # Acrylic glass design requires light mode
-        ctk.set_appearance_mode("light")
-        self.config.settings.theme = "light"
+        ctk.set_appearance_mode(theme)
+        self.config.settings.theme = theme
         save_config(self.config)
 
     def _on_balance_result(self, result: BalanceResult):

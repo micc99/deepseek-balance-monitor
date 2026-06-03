@@ -66,8 +66,15 @@ class GlassTheme:
 
     @classmethod
     def hex_to_rgb(cls, hex_color: str) -> Tuple[int, int, int]:
+        if not hex_color or hex_color == "transparent":
+            return (255, 255, 255)
         h = hex_color.lstrip("#")
-        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore
+        if len(h) < 6:
+            return (255, 255, 255)
+        try:
+            return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore
+        except ValueError:
+            return (255, 255, 255)
 
     @classmethod
     def rgb_to_hex(cls, r: int, g: int, b: int) -> str:
