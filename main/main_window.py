@@ -499,7 +499,7 @@ class MainWindow(ctk.CTk):
     CLOSE_ACTION_HIDE = "hide"
     CLOSE_ACTION_EXIT = "exit"
 
-    def __init__(self, config: AppConfig, on_switch_to_floating: Callable = None, on_apply_theme: Callable = None):
+    def __init__(self, config: AppConfig, on_switch_to_floating: Optional[Callable] = None, on_apply_theme: Optional[Callable] = None):
         super().__init__()
         self._config = config
         self._on_switch_to_floating = on_switch_to_floating

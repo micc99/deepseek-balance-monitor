@@ -10,7 +10,7 @@ from animations import AnimationHelper, GlassTheme
 
 
 class FloatingWindow(ctk.CTkToplevel):
-    def __init__(self, on_restore: Callable = None, on_refresh: Callable = None, on_exit: Callable = None):
+    def __init__(self, on_restore: Optional[Callable] = None, on_refresh: Optional[Callable] = None, on_exit: Optional[Callable] = None):
         super().__init__()
         self._on_restore = on_restore
         self._on_refresh = on_refresh
