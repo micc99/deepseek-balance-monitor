@@ -226,3 +226,20 @@ class UsageHistory:
             }
             for r in rows
         ]
+
+    def get_account_usage_summary(self, api_key_hashes: list[str], since: float) -> dict[str, int]:
+        if not api_key_hashes:
+            return {}
+        placeholders = ",".join("?" * len(api_key_hashes))
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT api_key_hash, COALESCE(SUM(total_tokens), 0) as tokens
+                    FROM token_usage
+                    WHERE api_key_hash IN ({placeholders}) AND timestamp >= ?
+                    GROUP BY api_key_hash""",
+                (*api_key_hashes, since),
+            ).fetchall()
+        result: dict[str, int] = {}
+        for r in rows:
+            result[r["api_key_hash"]] = r["tokens"]
+        return result
