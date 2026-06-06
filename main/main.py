@@ -20,6 +20,7 @@ from animations import AnimationHelper
 from balance_checker import BalanceStatus
 from usage_history import UsageHistory
 from usage_curve_window import BalanceCurveWindow
+from usage_bar_window import UsageBarWindow
 from usage_proxy import UsageProxy
 
 ctk.set_default_color_theme("blue")
@@ -191,6 +192,7 @@ class App:
         self.main_window.set_autostart_callback(_set_autostart)
         self.main_window.set_save_callback(lambda: save_config(self.config))
         self.main_window.set_view_curve_callback(self._on_view_curve)
+        self.main_window.set_view_usage_callback(self._on_view_usage)
 
         if self.config.settings.autostart:
             _set_autostart(True)
@@ -263,6 +265,14 @@ class App:
                 api_key=account.api_key,
                 uid=account.uid,
                 history=self._usage_history,
+            )
+
+    def _on_view_usage(self):
+        if self.main_window and self.main_window.winfo_exists():
+            UsageBarWindow(
+                self.main_window,
+                history=self._usage_history,
+                accounts=self.config.accounts,
             )
 
     def _refresh_floating(self):
