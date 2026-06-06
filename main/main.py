@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 
 import customtkinter as ctk
+import keyboard
 
 from config import load_config, save_config
 from scheduler import BalanceScheduler, BalanceResult
@@ -142,6 +143,10 @@ class App:
         self._usage_history = UsageHistory()
         self._usage_proxy = UsageProxy()
         self._usage_proxy.start()
+        try:
+            keyboard.add_hotkey("ctrl+shift+b", self._toggle_window)
+        except Exception:
+            pass
         self._proxy_url = self._usage_proxy.proxy_url
         self.main_window: MainWindow | None = None
         self.floating_window: FloatingWindow | None = None
@@ -275,6 +280,19 @@ class App:
                 accounts=self.config.accounts,
             )
 
+    def _toggle_window(self):
+        if self._exiting:
+            return
+        if self.main_window and self.main_window.winfo_exists():
+            if self.main_window.state() == "withdrawn":
+                self.main_window.after(0, self._show_main)
+            else:
+                self.main_window.after(0, self._on_minimize_to_floating_safe)
+
+    def _on_minimize_to_floating_safe(self):
+        if self.main_window and self.main_window.winfo_exists():
+            self.main_window._on_minimize_to_floating()
+
     def _refresh_floating(self):
         if not self.floating_window or not self.floating_window.winfo_exists():
             return
@@ -404,6 +422,10 @@ class App:
 
         self._usage_proxy.stop()
         self._cleanup_lock()
+        try:
+            keyboard.unhook_all()
+        except Exception:
+            pass
         os._exit(0)
 
 
