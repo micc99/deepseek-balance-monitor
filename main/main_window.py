@@ -5,8 +5,7 @@ from typing import Callable, Optional
 
 import customtkinter as ctk
 
-from config import AppConfig, AccountConfig, mask_api_key
-from balance_checker import BalanceInfo, BalanceStatus, PROVIDERS
+from config import AppConfig
 from scheduler import BalanceResult
 from animations import AnimationHelper
 from edit_account_dialog import EditAccountDialog
