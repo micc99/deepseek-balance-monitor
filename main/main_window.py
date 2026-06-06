@@ -46,6 +46,8 @@ class MainWindow(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Unmap>", self._on_minimize)
         self._setup_ui()
+        self.bind_all("<Control-r>", lambda e: self._on_manual_refresh())
+        self.bind_all("<Control-Shift-B>", lambda e: self._on_minimize_to_floating())
         self._rebuild_account_list()
 
     def _on_minimize(self, event):
