@@ -29,6 +29,7 @@ class MainWindow(ctk.CTk):
         self._autostart_callback: Optional[Callable] = None
         self._save_callback: Optional[Callable] = None
         self._on_view_curve_callback: Optional[Callable] = None
+        self._on_view_usage_callback: Optional[Callable] = None
         self._focus_check_id: Optional[str] = None
 
         self._drag_active = False
@@ -172,6 +173,17 @@ class MainWindow(ctk.CTk):
             font=ctk.CTkFont(size=11),
             text_color="gray",
         )
+        self.usage_btn = ctk.CTkButton(
+            footer,
+            text="用量概览",
+            width=100,
+            fg_color="transparent",
+            hover_color=("gray80", "gray30"),
+            command=self._on_view_usage,
+            font=ctk.CTkFont(size=11),
+        )
+        self.usage_btn.pack(side="right", padx=(0, 10))
+
         self.interval_label.pack(side="right")
         self.interval_label.bind("<Double-Button-1>", self._on_interval_double_click)
         self._update_interval_label()
@@ -389,6 +401,9 @@ class MainWindow(ctk.CTk):
         for row in self._account_rows:
             row._on_view_curve = callback
 
+    def set_view_usage_callback(self, callback: Callable):
+        self._on_view_usage_callback = callback
+
     def set_status(self, text: str):
         self.status_label.configure(text=text)
 
@@ -415,6 +430,10 @@ class MainWindow(ctk.CTk):
             if self._on_apply_theme:
                 self._on_apply_theme(theme)
             self._notify_save()
+
+    def _on_view_usage(self):
+        if self._on_view_usage_callback:
+            self._on_view_usage_callback()
 
     def _update_interval_label(self):
         sec = self._config.settings.interval_sec
