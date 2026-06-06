@@ -34,6 +34,9 @@ _lock = threading.Lock()
 
 def _ensure_db_path():
     os.makedirs(_USAGE_DB_DIR, exist_ok=True)
+    conn = sqlite3.connect(_USAGE_DB_PATH)
+    _init_db(conn)
+    conn.close()
 
 
 def _hash_key(api_key: str) -> str:
@@ -90,7 +93,7 @@ def log_usage(api_key: str, usage: dict):
                  Expected keys: prompt_tokens, completion_tokens, total_tokens,
                                 prompt_cache_hit_tokens, prompt_cache_miss_tokens (optional).
     """
-    if not usage or not isinstance(usage, dict):
+    if usage is None or not isinstance(usage, dict):
         return
     key_hash = _hash_key(api_key)
     now = time.time()
