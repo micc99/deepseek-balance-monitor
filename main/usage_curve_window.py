@@ -49,6 +49,12 @@ def _get_theme_colors():
 
 
 class BalanceCurveWindow(ctk.CTkToplevel):
+    """单账户余额趋势折线图，支持时间范围切换和渐进动画。
+
+    双击账户行的余额列打开。数据源为 balance_snapshots 表。
+    hover 交互通过 matplotlib 的 motion_notify_event 实现。
+    """
+
     def __init__(self, parent, account_label: str, api_key: str, uid: str, history: UsageHistory):
         super().__init__(parent)
         self.title(f"余额趋势 — {account_label}")
@@ -74,6 +80,7 @@ class BalanceCurveWindow(ctk.CTkToplevel):
         self.focus()
 
     def destroy(self):
+        """取消动画定时器 + 释放 matplotlib Figure，防止内存泄漏。"""
         self._cancel_animation()
         if self._fig is not None:
             import matplotlib.pyplot as plt

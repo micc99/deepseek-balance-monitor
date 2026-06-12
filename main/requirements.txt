@@ -5,4 +5,4 @@ Pillow>=9.0.0
 matplotlib>=3.9.0
 keyboard>=0.13.5
 
-#pyinstaller --windowed --icon=deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor v1.9" main.py
+#pyinstaller --windowed --icon=deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor v2.0" main.py

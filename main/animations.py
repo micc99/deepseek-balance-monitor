@@ -3,15 +3,24 @@ import tkinter as tk
 import customtkinter as ctk
 
 
+"""UI 动画工具类（纯静态方法）。
+
+提供淡入淡出、波纹点击、数值闪烁三种动画效果。
+波纹颜色可通过 set_ripple_color 全局配置。
+"""
+
+
 class AnimationHelper:
     _ripple_color = "#aaddff"
 
     @staticmethod
     def set_ripple_color(color: str):
+        """设置全局波纹颜色，由设置对话框调用。"""
         AnimationHelper._ripple_color = color
 
     @staticmethod
     def fade_in(window, duration=300):
+        """窗口淡入：alpha 0→1，15 步线性插值。"""
         steps = 15
         delay = duration // steps
         step_size = 1.0 / steps
@@ -28,6 +37,7 @@ class AnimationHelper:
 
     @staticmethod
     def fade_out(window, duration=300, callback=None):
+        """窗口淡出：alpha 1→0，完成后执行 callback（如恢复主窗口）。"""
         steps = 15
         delay = duration // steps
         step_size = 1.0 / steps
@@ -45,12 +55,14 @@ class AnimationHelper:
 
     @staticmethod
     def flash_widget(widget, color, duration=500):
+        """短暂改变组件背景色后恢复，用于余额变化时的视觉反馈。"""
         original_color = widget.cget("fg_color")
         widget.configure(fg_color=color)
         widget.after(duration, lambda: widget.configure(fg_color=original_color))
 
     @staticmethod
     def bind_ripple(widget, command=None):
+        """绑定波纹点击效果。command 在波纹动画开始 50ms 后执行。"""
         if command:
             widget.bind("<Button-1>", lambda e: AnimationHelper._create_ripple_with_command(widget, e, command), add="+")
         else:

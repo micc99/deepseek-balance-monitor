@@ -30,15 +30,18 @@ BAR_LABELS = ["today", "week", "month"]
 
 
 def _start_of_day(dt: datetime) -> float:
+    """当天 00:00:00 的 Unix 时间戳，用作查询下界。"""
     return dt.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
 
 def _start_of_week(dt: datetime) -> float:
+    """本周一 00:00:00 的 Unix 时间戳。"""
     monday = dt - timedelta(days=dt.weekday())
     return monday.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
 
 def _start_of_month(dt: datetime) -> float:
+    """本月 1 日 00:00:00 的 Unix 时间戳。"""
     first = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     return first.timestamp()
 
@@ -52,6 +55,12 @@ def _get_theme_colors():
 
 
 class UsageBarWindow(ctk.CTkToplevel):
+    """用量概览窗口：分组柱状图展示各账户在今日/本周/本月的消耗金额。
+
+    数据源：balance_snapshots 表，通过期初余额 - 期末余额计算消耗。
+    如果 token_usage 表有数据（代理记录），也可切换为 token 维度。
+    """
+
     def __init__(self, parent, history: UsageHistory, accounts: list):
         super().__init__(parent)
         self.title("用量概览")
@@ -73,6 +82,11 @@ class UsageBarWindow(ctk.CTkToplevel):
         self.focus()
 
     def destroy(self):
+        """关闭窗口时释放 matplotlib Figure，避免内存泄漏。
+
+        matplotlib 的 Figure 对象不会随 tkinter 窗口销毁自动回收，
+        必须显式 plt.close() 才能释放其内部缓存和渲染上下文。
+        """
         if self._fig is not None:
             import matplotlib.pyplot as plt
             plt.close(self._fig)

@@ -2,10 +2,18 @@ import ctypes
 import ctypes.wintypes
 import sys
 
+"""Windows 单实例互斥锁。
+
+通过 Win32 CreateMutexW 创建全局命名互斥量，
+第二个进程启动时检测到已存在则发送 IPC 信号并退出。
+非 Windows 平台直接放行。
+"""
+
 ERROR_ALREADY_EXISTS = 183
 
 
 class InstanceLock:
+    """系统级单实例锁，支持上下文管理器。"""
     _mutex = None
     _acquired = False
 

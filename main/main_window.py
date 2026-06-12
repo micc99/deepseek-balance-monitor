@@ -13,7 +13,18 @@ from settings_dialog import SettingsDialog
 from account_row import AccountRow
 
 
+"""主窗口：账户列表管理、余额显示、设置入口。
+
+功能：
+- 账户 CRUD（添加/编辑/删除/拖拽排序）
+- 余额实时更新（调度器回调 → AccountRow）
+- 焦点丢失自动切换到悬浮窗
+- 设置对话框（间隔/主题/波纹/代理目标）
+"""
+
+
 class MainWindow(ctk.CTk):
+    """应用主窗口，继承 CTk（customtkinter 的根窗口）。"""
     CLOSE_ACTION_HIDE = "hide"
     CLOSE_ACTION_EXIT = "exit"
 
@@ -67,6 +78,11 @@ class MainWindow(ctk.CTk):
             self._focus_check_id = None
 
     def _focus_check_loop(self):
+        """轮询焦点状态：失焦且无子对话框时自动切悬浮窗。
+
+        500ms 间隔检查，withdrawn 状态下 1000ms 跳过（省 CPU）。
+        有 CTkToplevel 子窗口时暂停检测，避免对话框抢焦点导致误切。
+        """
         if not self.winfo_exists():
             return
         if self.state() == "withdrawn":
@@ -191,6 +207,7 @@ class MainWindow(ctk.CTk):
         self._update_interval_label()
 
     def _rebuild_account_list(self):
+        """销毁所有 AccountRow 并从 config 重建，拖拽排序后也会调用。"""
         for row in self._account_rows:
             row.destroy()
         self._account_rows.clear()
@@ -216,6 +233,7 @@ class MainWindow(ctk.CTk):
             self._account_rows.append(row)
 
     def _on_drag_press(self, idx: int, event):
+        """记录拖拽起点，400ms 长按或 5px 位移后激活拖拽模式。"""
         self._drag_source_idx = idx
         self._drag_target_idx = idx
         self._drag_start_y = event.y_root

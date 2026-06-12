@@ -45,10 +45,20 @@ class AggregatedUsage:
 
 
 def _hash_key(api_key: str) -> str:
+    """API key 的 MD5 指纹（前 16 位 hex），避免明文存储。"""
     return hashlib.md5(api_key.encode()).hexdigest()[:16]
 
 
 class UsageHistory:
+    """SQLite 持久层，管理两张表：
+    - token_usage:       代理拦截到的逐次 API 调用 token 用量
+    - balance_snapshots: 调度器定时采集的账户余额快照
+
+    两张表共享同一个 DB 文件，但写入方不同：
+    token_usage 由 usage_proxy / usage_logger 写入，
+    balance_snapshots 由 main.py 的 _record_balance_snapshot 写入。
+    """
+
     def __init__(self, db_path: str = _USAGE_DB_PATH):
         self._db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -94,6 +104,7 @@ class UsageHistory:
             conn.commit()
 
     def record_balance_snapshot(self, uid: str, api_key_hash: str, balance: float, currency: str):
+        """记录一次余额快照，由调度器每次轮询后调用。"""
         with self._get_conn() as conn:
             conn.execute(
                 "INSERT INTO balance_snapshots (uid, api_key_hash, timestamp, balance, currency) VALUES (?, ?, ?, ?, ?)",
@@ -134,6 +145,11 @@ class UsageHistory:
         ]
 
     def get_latest_balance_per_account(self, uids: list[str], since: float) -> dict[str, float]:
+        """取每个账户在 [since, now] 内的最新余额。
+
+        用于悬浮窗/图表展示各账户当前余额水平。
+        通过子查询 MAX(id) 避免全表排序，性能优于 ORDER BY + LIMIT。
+        """
         if not uids:
             return {}
         placeholders = ",".join("?" * len(uids))
@@ -151,6 +167,11 @@ class UsageHistory:
         return {r["uid"]: r["balance"] for r in rows}
 
     def get_balance_consumption(self, uids: list[str], since: float) -> dict[str, float]:
+        """计算每个账户在 [since, now] 内的消耗金额（期初余额 - 期末余额）。
+
+        如果期间发生充值（余额反增），消耗记为 0，避免显示负数。
+        返回 {uid: consumption}，uid 不在快照中则不出现在结果里。
+        """
         if not uids:
             return {}
         placeholders = ",".join("?" * len(uids))
@@ -277,6 +298,16 @@ class UsageHistory:
         since: float,
         label_map: Optional[dict[str, str]] = None,
     ) -> dict[str, int]:
+        """按账户汇总 token 用量（来自代理拦截的 token_usage 表）。
+
+        Args:
+            api_key_hashes: 要查询的 API key 哈希列表
+            since:          起始时间戳（含）
+            label_map:      若提供，结果键从 hash 转为 label，方便 UI 直接使用
+
+        Returns:
+            {hash_or_label: total_tokens}，无数据的账户值为 0
+        """
         if not api_key_hashes:
             return {}
         placeholders = ",".join("?" * len(api_key_hashes))

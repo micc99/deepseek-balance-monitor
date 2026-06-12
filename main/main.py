@@ -123,6 +123,16 @@ def _format_time(ts: float) -> str:
 
 
 class App:
+    """应用编排器：管理所有子系统的生命周期。
+
+    职责：
+    - 单实例互斥 + IPC 通信
+    - 调度器/代理/历史记录的创建和销毁
+    - 主窗口 ↔ 悬浮窗的切换
+    - 系统托盘图标
+    - 开机自启快捷方式
+    """
+
     def __init__(self):
         self._lock = InstanceLock(LOCK_NAME)
         if not self._lock.acquire():
@@ -141,6 +151,7 @@ class App:
         self.scheduler = BalanceScheduler(self.config)
         self._active_keys: set[str] = _load_active_keys()
         self._usage_history = UsageHistory()
+        # 代理目标从配置读取，用户可在设置中切换 provider（需重启生效）
         self._usage_proxy = UsageProxy(target_host=self.config.settings.proxy_target)
         self._usage_proxy.start()
         try:
@@ -226,6 +237,7 @@ class App:
         save_config(self.config)
 
     def _on_balance_result(self, result: BalanceResult):
+        """调度器回调：记录余额快照 + 更新 UI（线程安全地 post 到主线程）。"""
         if self._exiting:
             return
         self._record_balance_snapshot(result)
@@ -233,6 +245,7 @@ class App:
             self.main_window.after(0, self._update_ui, result)
 
     def _record_balance_snapshot(self, result: BalanceResult):
+        """将余额快照写入 SQLite，供余额趋势图和消耗计算使用。"""
         if result.info.status != BalanceStatus.OK or not result.info.balances:
             return
         acc = next((a for a in self.config.accounts if a.uid == result.uid), None)
@@ -345,6 +358,8 @@ class App:
             self.floating_window.set_position(self.config.window)
 
     def _show_main(self):
+        # 主动销毁悬浮窗而非 withdraw，释放其 tkinter 资源；
+        # 下次切回悬浮窗时 _show_floating 会重建
         if self.floating_window:
             if self.floating_window.winfo_exists():
                 self.config.window = self.floating_window.get_position()

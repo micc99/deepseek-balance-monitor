@@ -11,7 +11,16 @@ from scheduler import BalanceResult
 from animations import AnimationHelper
 
 
+"""单账户行组件。
+
+每行显示：标签名、脱敏 API Key、Provider、余额、状态灯、删除按钮。
+支持双击复制 Key、双击余额查看趋势曲线、拖拽排序。
+"""
+
+
 class AccountRow(ctk.CTkFrame):
+    """主窗口中的一行账户信息，由 _rebuild_account_list 动态创建。"""
+
     def __init__(
         self,
         master,
@@ -109,6 +118,7 @@ class AccountRow(ctk.CTkFrame):
         AnimationHelper.bind_ripple(del_btn, lambda u=self.account.uid: self._on_delete(u))
 
     def update_balance(self, result: BalanceResult):
+        """调度器回调入口：根据状态更新余额文字、颜色和状态灯。"""
         if self.uid != result.uid:
             return
         info = result.info

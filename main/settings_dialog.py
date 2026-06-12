@@ -5,6 +5,12 @@ import tkinter as tk
 import customtkinter as ctk
 
 
+"""设置对话框：刷新间隔、主题、波纹颜色、代理目标、开机自启。
+
+代理目标变更后需重启程序才能生效（代理端口在启动时绑定）。
+"""
+
+
 class SettingsDialog(ctk.CTkToplevel):
     RIPPLE_COLORS = {
         "淡蓝色": "#aaddff",
@@ -15,6 +21,8 @@ class SettingsDialog(ctk.CTkToplevel):
         "淡白色": "#ffffff",
     }
 
+    # 代理可转发的 API 提供商列表，值为各 provider 的域名
+    # 用户选择后需重启程序使代理生效
     PROXY_TARGETS = {
         "DeepSeek": "api.deepseek.com",
         "SiliconFlow": "api.siliconflow.cn",

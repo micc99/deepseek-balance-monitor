@@ -5,15 +5,23 @@ from typing import Optional
 import requests
 
 
+"""多 Provider 余额查询抽象层。
+
+每个 Provider 子类实现自己的 API 响应解析，统一返回 BalanceInfo。
+新增 Provider 只需继承 BaseProvider 并注册到 PROVIDERS 字典。
+"""
+
+
 class BalanceStatus(Enum):
     OK = "ok"
     ERROR = "error"
-    LOADING = "loading"
+    LOADING = "loading"  # 请求进行中，UI 显示占位
     UNKNOWN = "unknown"
 
 
 @dataclass
 class CurrencyBalance:
+    """单币种余额明细。多币种账户（如 DeepSeek CNY+USD）会有多个实例。"""
     currency: str
     total_balance: str
     granted_balance: str = "0.00"
@@ -22,6 +30,7 @@ class CurrencyBalance:
 
 @dataclass
 class BalanceInfo:
+    """一次余额查询的完整结果，包含状态、余额列表和错误信息。"""
     is_available: bool = False
     balances: list[CurrencyBalance] = field(default_factory=list)
     status: BalanceStatus = BalanceStatus.UNKNOWN
@@ -29,10 +38,12 @@ class BalanceInfo:
 
     @property
     def primary_balance(self) -> Optional[CurrencyBalance]:
+        """取第一个币种余额，用于单币种场景的快捷访问。"""
         return self.balances[0] if self.balances else None
 
     @property
     def total_display(self) -> str:
+        """格式化显示字符串，如 '¥100.50 | $20.00'，跳过零余额。"""
         if not self.balances:
             return "N/A"
         parts = []
@@ -49,15 +60,18 @@ class BalanceInfo:
 
 
 class BaseProvider(ABC):
+    """Provider 基类。子类必须实现 _parse_response 来适配不同 API 的响应格式。"""
     name: str = "base"
     label: str = "Base"
     description: str = ""
 
     @abstractmethod
     def check_balance(self, api_key: str) -> BalanceInfo:
+        """发起 HTTP 请求查询余额，返回统一的 BalanceInfo。"""
         ...
 
     def _make_request(self, url: str, api_key: str, timeout: int = 10) -> BalanceInfo:
+        """通用 GET 请求 + 错误处理，子类只需提供 URL 和 _parse_response。"""
         try:
             resp = requests.get(
                 url,
@@ -209,6 +223,7 @@ class ZhipuProvider(BaseProvider):
         )
 
 
+# 全局 Provider 注册表，key 与 config.json 中的 provider 字段对应
 PROVIDERS: dict[str, BaseProvider] = {
     "deepseek": DeepSeekProvider(),
     "siliconflow": SiliconFlowProvider(),

@@ -9,7 +9,16 @@ from config import WindowConfig
 from animations import AnimationHelper
 
 
+"""无边框悬浮窗。
+
+主窗口最小化/关闭后显示，置顶、可拖拽。
+双击恢复主窗口，右键弹出刷新/退出菜单。
+由 App 按需创建和销毁（非 withdraw），以节省内存。
+"""
+
+
 class FloatingWindow(ctk.CTkToplevel):
+    """紧凑型悬浮窗：标题 + 余额摘要 + 状态栏。"""
     def __init__(self, on_restore: Callable = None, on_refresh: Callable = None, on_exit: Callable = None):
         super().__init__()
         self._on_restore = on_restore

@@ -8,6 +8,13 @@ import customtkinter as ctk
 from config import AccountConfig
 
 
+"""添加/编辑账号的模态对话框。
+
+支持重复 API Key 检测：若 key 已存在，返回 duplicate_uid 而非 result，
+调用方据此高亮已有行而非新增。
+"""
+
+
 class EditAccountDialog(ctk.CTkToplevel):
     def __init__(self, parent, title: str, account: Optional[AccountConfig] = None, default_label: str = "",
                  existing_accounts: Optional[list[AccountConfig]] = None, exclude_uid: Optional[str] = None):

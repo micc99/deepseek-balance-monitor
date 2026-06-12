@@ -35,7 +35,7 @@ class SettingsConfig:
     theme: str = "dark"
     autostart: bool = True
     ripple_color: str = "#aaddff"
-    proxy_target: str = "api.deepseek.com"
+    proxy_target: str = "api.deepseek.com"  # 代理转发目标，改为其他 provider 域名即可记录其用量
 
 
 @dataclass

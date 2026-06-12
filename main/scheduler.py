@@ -6,7 +6,15 @@ from balance_checker import BalanceInfo, BalanceStatus, get_provider
 from config import AppConfig, AccountConfig
 
 
+"""后台余额轮询调度器。
+
+独立线程按配置间隔逐一检查所有账户余额，
+结果通过回调推送给 UI 层，同时缓存在 _last_results 供悬浮窗读取。
+"""
+
+
 class BalanceResult:
+    """单次余额查询的打包结果，用 __slots__ 减少内存开销。"""
     __slots__ = ("uid", "label", "info", "timestamp")
 
     def __init__(self, uid: str, label: str, info: BalanceInfo):
@@ -17,6 +25,8 @@ class BalanceResult:
 
 
 class BalanceScheduler:
+    """余额轮询引擎。管理后台线程，支持手动刷新、间隔调整、回调注册。"""
+
     def __init__(self, config: AppConfig):
         self._config = config
         self._running = False
@@ -77,6 +87,7 @@ class BalanceScheduler:
             self._wake_event.clear()
 
     def _check_all(self):
+        """并发检查所有账户，每个账户一个线程，15 秒超时防止卡死。"""
         with self._lock:
             accounts = list(self._config.accounts)
         threads = []
