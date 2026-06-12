@@ -416,13 +416,15 @@ class MainWindow(ctk.CTk):
             self._config.settings.autostart,
             self._config.settings.theme,
             self._config.settings.ripple_color,
+            self._config.settings.proxy_target,
         )
         if result is not None:
-            interval, autostart, theme, ripple_color = result
+            interval, autostart, theme, ripple_color, proxy_target = result
             self._config.settings.interval_sec = interval
             self._config.settings.autostart = autostart
             self._config.settings.theme = theme
             self._config.settings.ripple_color = ripple_color
+            self._config.settings.proxy_target = proxy_target
             AnimationHelper.set_ripple_color(ripple_color)
             self._update_interval_label()
             if self._settings_callback:

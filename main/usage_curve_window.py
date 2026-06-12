@@ -62,6 +62,7 @@ class BalanceCurveWindow(ctk.CTkToplevel):
         self._account_label = account_label
 
         self._canvas: Optional[FigureCanvasTkAgg] = None
+        self._fig: Optional[Figure] = None
         self._animating = False
         self._anim_timer: Optional[str] = None
 
@@ -71,6 +72,17 @@ class BalanceCurveWindow(ctk.CTkToplevel):
         self.grab_set()
         self.lift()
         self.focus()
+
+    def destroy(self):
+        self._cancel_animation()
+        if self._fig is not None:
+            import matplotlib.pyplot as plt
+            plt.close(self._fig)
+            self._fig = None
+        if self._canvas is not None:
+            self._canvas.get_tk_widget().destroy()
+            self._canvas = None
+        super().destroy()
 
     def _setup_ui(self):
         self.grid_columnconfigure(0, weight=1)
@@ -129,6 +141,7 @@ class BalanceCurveWindow(ctk.CTkToplevel):
         tc = _get_theme_colors()
         fig = Figure(figsize=(9, 5), dpi=100)
         fig.patch.set_facecolor(tc["bg"])
+        self._fig = fig
 
         ax = fig.add_subplot(111)
         ax.set_facecolor(tc["axes"])
@@ -140,11 +153,12 @@ class BalanceCurveWindow(ctk.CTkToplevel):
             ax.set_yticks([])
             for spine in ax.spines.values():
                 spine.set_visible(False)
-            fig.tight_layout()
             self._canvas = FigureCanvasTkAgg(fig, master=self)
             canvas_widget = self._canvas.get_tk_widget()
             canvas_widget.grid(row=1, column=0, sticky="nsew", padx=10, pady=(5, 10))
             self.grid_rowconfigure(1, weight=1)
+            canvas_widget.update_idletasks()
+            fig.tight_layout()
             self._canvas.draw()
             return
 
@@ -166,12 +180,12 @@ class BalanceCurveWindow(ctk.CTkToplevel):
         ax.set_xlabel("时间", fontsize=11)
         _style_ax(ax, tc)
 
-        fig.tight_layout()
-
         self._canvas = FigureCanvasTkAgg(fig, master=self)
         canvas_widget = self._canvas.get_tk_widget()
         canvas_widget.grid(row=1, column=0, sticky="nsew", padx=10, pady=(5, 10))
         self.grid_rowconfigure(1, weight=1)
+        canvas_widget.update_idletasks()
+        fig.tight_layout()
         self._canvas.draw()
 
         self._times = times
@@ -180,59 +194,113 @@ class BalanceCurveWindow(ctk.CTkToplevel):
         self._ax = ax
         self._tc = tc
 
+        self._symbol = symbol
         self._line = None
         self._fill = None
 
-        if animate and len(times) > 0:
-            self._animate_draw(0)
+        self._hover_annot = ax.annotate(
+            "", xy=(0, 0), xytext=(12, -20), textcoords="offset points",
+            bbox=dict(boxstyle="round,pad=0.4", fc=tc["axes"], ec=tc["grid"], alpha=0.92),
+            color=tc["text"], fontsize=10, ha="left", va="top",
+            arrowprops=dict(arrowstyle="->", color=tc["text"], lw=1.0),
+        )
+        self._hover_annot.set_visible(False)
+        self._hover_dot, = ax.plot([], [], "o", color="#ffffff", markersize=8,
+                                     markeredgecolor="#ce93d8", markeredgewidth=2.5, zorder=10)
+        self._hover_dot.set_visible(False)
+        self._fig.canvas.mpl_connect("motion_notify_event", self._on_hover)
+
+        if animate and len(times) > 1:
+            t_start = mdates.date2num(times[0])
+            t_end = mdates.date2num(times[-1])
+            t_span = t_end - t_start
+            margin = t_span * 0.05
+            ax.set_xlim(t_start - margin, t_end + margin)
+            self._canvas.draw()
+            self._animate_draw()
         else:
             self._line, = ax.plot(times, values, color=COLOR_BALANCE, linewidth=1.5,
-                                   marker=".", markersize=3)  # type: ignore[arg-type]
+                                    marker=".", markersize=3)  # type: ignore[arg-type]
             self._fill = ax.fill_between(times, values, alpha=0.15, color=COLOR_BALANCE)  # type: ignore[arg-type]
             self._canvas.draw()
 
-    def _animate_draw(self, idx: int):
+    def _animate_draw(self):
         if not self._canvas or not self._ax:
             return
-        if self._animating and idx == 0:
+        if self._animating:
             self._cancel_animation()
         self._animating = True
 
         n = len(self._times)
-        if idx >= n:
-            self._animating = False
-            self._anim_timer = None
-            return
+        self._anim_total = 20
+        self._anim_step = 0
 
-        if self._line is not None:
-            self._line.remove()
-        if self._fill is not None:
-            self._fill.remove()
+        _ax = self._ax
+        _times = self._times
+        _values = self._values
 
-        slice_times = self._times[:idx + 1]
-        slice_values = self._values[:idx + 1]
+        def _step():
+            if not self._animating or not _ax or not self._canvas:
+                return
+            step = self._anim_step
+            total = self._anim_total
+            if step >= total:
+                self._animating = False
+                self._anim_timer = None
+                return
 
-        self._ax.set_title(f"余额趋势 ({(idx + 1) / n:.0%})", fontsize=13, color=self._tc["title"], pad=8)
-        self._line, = self._ax.plot(slice_times, slice_values, color=COLOR_BALANCE, linewidth=1.5,
+            idx = int((step + 1) / total * n)
+            idx = min(idx, n)
+
+            if self._line is not None:
+                self._line.remove()
+            if self._fill is not None:
+                self._fill.remove()
+
+            slice_times = _times[:idx]
+            slice_values = _values[:idx]
+            self._line, = _ax.plot(slice_times, slice_values, color=COLOR_BALANCE, linewidth=1.5,
                                      marker=".", markersize=3)  # type: ignore[arg-type]
-        self._fill = self._ax.fill_between(slice_times, slice_values, alpha=0.15, color=COLOR_BALANCE)  # type: ignore[arg-type]
+            self._fill = _ax.fill_between(slice_times, slice_values, alpha=0.15, color=COLOR_BALANCE)  # type: ignore[arg-type]
 
-        self._canvas.draw()
-
-        if idx < n - 1:
-            delay = max(2, int(600 / n))
-            self._anim_timer = self.after(delay, lambda: self._animate_draw(idx + 1))
-        else:
-            self._ax.set_title("余额趋势", fontsize=13, color=self._tc["title"], pad=8)
             self._canvas.draw()
-            self._animating = False
-            self._anim_timer = None
+            self._anim_step += 1
+            self._anim_timer = self.after(20, _step)
+
+        _step()
 
     def _cancel_animation(self):
         self._animating = False
         if self._anim_timer is not None:
             self.after_cancel(self._anim_timer)
             self._anim_timer = None
+
+    def _on_hover(self, event):
+        if not hasattr(self, "_hover_annot") or not hasattr(self, "_hover_dot"):
+            return
+        if event.inaxes != getattr(self, "_ax", None):
+            self._hover_annot.set_visible(False)
+            self._hover_dot.set_visible(False)
+            self._canvas.draw_idle()
+            return
+        if self._line is None or len(self._times) == 0:
+            return
+
+        contains, info = self._line.contains(event)
+        if contains and len(info.get("ind", [])) > 0:
+            idx = info["ind"][0]
+            x = self._times[idx]
+            y = self._values[idx]
+            time_str = x.strftime("%Y-%m-%d %H:%M:%S")
+            self._hover_annot.xy = (mdates.date2num(x), y)
+            self._hover_annot.set_text(f"{time_str}\n{self._symbol}{y:,.4f}")
+            self._hover_annot.set_visible(True)
+            self._hover_dot.set_data([mdates.date2num(x)], [y])
+            self._hover_dot.set_visible(True)
+        else:
+            self._hover_annot.set_visible(False)
+            self._hover_dot.set_visible(False)
+        self._canvas.draw_idle()
 
 
 def _style_ax(ax, tc):

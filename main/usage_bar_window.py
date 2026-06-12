@@ -63,6 +63,7 @@ class UsageBarWindow(ctk.CTkToplevel):
         self._accounts = accounts
 
         self._canvas: Optional[FigureCanvasTkAgg] = None
+        self._fig: Optional[Figure] = None
 
         self._setup_ui()
         self._render()
@@ -70,6 +71,16 @@ class UsageBarWindow(ctk.CTkToplevel):
         self.grab_set()
         self.lift()
         self.focus()
+
+    def destroy(self):
+        if self._fig is not None:
+            import matplotlib.pyplot as plt
+            plt.close(self._fig)
+            self._fig = None
+        if self._canvas is not None:
+            self._canvas.get_tk_widget().destroy()
+            self._canvas = None
+        super().destroy()
 
     def _setup_ui(self):
         self.grid_columnconfigure(0, weight=1)
@@ -93,6 +104,7 @@ class UsageBarWindow(ctk.CTkToplevel):
         tc = _get_theme_colors()
         fig = Figure(figsize=(9, 5), dpi=100)
         fig.patch.set_facecolor(tc["bg"])
+        self._fig = fig
 
         ax = fig.add_subplot(111)
         ax.set_facecolor(tc["axes"])
@@ -104,12 +116,9 @@ class UsageBarWindow(ctk.CTkToplevel):
             "month": ("本月", _start_of_month(now)),
         }
 
-        hashes_by_label: dict[str, str] = {}
-        for acc in self._accounts:
-            from usage_history import _hash_key
-            hashes_by_label[acc.label] = _hash_key(acc.api_key)
+        uid_map = {acc.uid: acc.label for acc in self._accounts}
 
-        if not hashes_by_label:
+        if not uid_map:
             ax.text(0.5, 0.5, "暂无账号数据", ha="center", va="center",
                     transform=ax.transAxes, color=tc["text"], fontsize=12)
             ax.set_xticks([])
@@ -125,13 +134,13 @@ class UsageBarWindow(ctk.CTkToplevel):
             self._canvas.draw()
             return
 
-        all_hashes = list(hashes_by_label.values())
-        data: dict[str, dict[str, int]] = {}
+        all_uids = list(uid_map.keys())
+        data: dict[str, dict[str, float]] = {}
         for period_key, (_, since) in periods.items():
-            summary = self._history.get_account_usage_summary(all_hashes, since)
-            data[period_key] = summary
+            raw = self._history.get_balance_consumption(all_uids, since)
+            data[period_key] = {uid_map.get(uid, uid): round(val, 2) for uid, val in raw.items()}
 
-        labels = list(hashes_by_label.keys())
+        labels = list(uid_map.values())
         x = range(len(labels))
         width = 0.25
 
@@ -139,18 +148,21 @@ class UsageBarWindow(ctk.CTkToplevel):
         colors = BAR_COLORS.get(mode, BAR_COLORS["dark"])
 
         offsets = [-width, 0, width]
+        has_data = False
         for i, (period_key, period_label) in enumerate(zip(BAR_LABELS, ["今日", "本周", "本月"])):
-            values = [data[period_key].get(hashes_by_label.get(lbl, ""), 0) for lbl in labels]
+            values = [data[period_key].get(lbl, 0.0) for lbl in labels]
+            if any(v > 0 for v in values):
+                has_data = True
             bars = ax.bar([p + offsets[i] for p in x], values, width,
                           label=period_label, color=colors[period_key], alpha=0.85)
             for bar, val in zip(bars, values):
                 if val > 0:
                     ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + max(values) * 0.01,
-                            str(val), ha="center", va="bottom", fontsize=8, color=tc["tick"])
+                            f"¥{val:,.2f}", ha="center", va="bottom", fontsize=8, color=tc["tick"])
 
         ax.set_xticks(x)
         ax.set_xticklabels(labels, fontsize=11)
-        ax.set_ylabel("令牌数", fontsize=11)
+        ax.set_ylabel("消耗金额", fontsize=11)
         ax.set_title("用量概览", fontsize=13, color=tc["title"], pad=8)
         ax.legend(fontsize=10, loc="upper right")
 
@@ -160,6 +172,12 @@ class UsageBarWindow(ctk.CTkToplevel):
         ax.tick_params(colors=tc["tick"], labelsize=10)
         ax.yaxis.label.set_color(tc["label"])
         ax.xaxis.label.set_color(tc["label"])
+
+        if not has_data:
+            ax.text(0.5, 0.45, "暂无消耗记录", ha="center", va="center",
+                    transform=ax.transAxes, color=tc["text"], fontsize=14, alpha=0.7)
+            ax.text(0.5, 0.35, "余额未发生变更或无快照数据", ha="center", va="center",
+                    transform=ax.transAxes, color=tc["text"], fontsize=10, alpha=0.5)
 
         self._canvas = FigureCanvasTkAgg(fig, master=self)
         canvas_widget = self._canvas.get_tk_widget()

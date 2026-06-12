@@ -1,4 +1,4 @@
-__version__ = "1.8"
+__version__ = "1.9"
 
 import ctypes
 import json
@@ -141,7 +141,7 @@ class App:
         self.scheduler = BalanceScheduler(self.config)
         self._active_keys: set[str] = _load_active_keys()
         self._usage_history = UsageHistory()
-        self._usage_proxy = UsageProxy()
+        self._usage_proxy = UsageProxy(target_host=self.config.settings.proxy_target)
         self._usage_proxy.start()
         try:
             keyboard.add_hotkey("ctrl+shift+b", self._toggle_window)
@@ -349,7 +349,8 @@ class App:
             if self.floating_window.winfo_exists():
                 self.config.window = self.floating_window.get_position()
                 save_config(self.config)
-            self.floating_window.withdraw()
+            self.floating_window.destroy()
+            self.floating_window = None
 
         if self.main_window:
             self.main_window.deiconify()

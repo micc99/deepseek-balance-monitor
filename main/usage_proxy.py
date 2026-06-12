@@ -32,6 +32,8 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+        target = self.proxy_ref._target_host if self.proxy_ref else TARGET_HOST
+
         fwd_headers = {
             k: v for k, v in self.headers.items()
             if k.lower() not in ("host", "content-length", "connection",
@@ -39,7 +41,7 @@ class _Handler(BaseHTTPRequestHandler):
         }
 
         import http.client
-        conn = http.client.HTTPSConnection(TARGET_HOST, timeout=120)
+        conn = http.client.HTTPSConnection(target, timeout=120)
         try:
             conn.request(method, self.path, body=body, headers=fwd_headers)
             resp = conn.getresponse()
@@ -119,9 +121,10 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class UsageProxy:
-    def __init__(self, host: str = PROXY_HOST, port: int = PROXY_PORT):
+    def __init__(self, host: str = PROXY_HOST, port: int = PROXY_PORT, target_host: str = TARGET_HOST):
         self._host = host
         self._port = port
+        self._target_host = target_host
         self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
 

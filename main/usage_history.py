@@ -133,6 +133,50 @@ class UsageHistory:
             for r in rows
         ]
 
+    def get_latest_balance_per_account(self, uids: list[str], since: float) -> dict[str, float]:
+        if not uids:
+            return {}
+        placeholders = ",".join("?" * len(uids))
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT uid, balance FROM balance_snapshots
+                    WHERE uid IN ({placeholders}) AND timestamp >= ?
+                    AND id IN (
+                        SELECT MAX(id) FROM balance_snapshots
+                        WHERE uid IN ({placeholders}) AND timestamp >= ?
+                        GROUP BY uid
+                    )""",
+                (*uids, since, *uids, since),
+            ).fetchall()
+        return {r["uid"]: r["balance"] for r in rows}
+
+    def get_balance_consumption(self, uids: list[str], since: float) -> dict[str, float]:
+        if not uids:
+            return {}
+        placeholders = ",".join("?" * len(uids))
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT uid,
+                           (SELECT balance FROM balance_snapshots
+                            WHERE uid = bs.uid AND timestamp >= ?
+                            ORDER BY timestamp ASC LIMIT 1) as first_bal,
+                           (SELECT balance FROM balance_snapshots
+                            WHERE uid = bs.uid AND timestamp >= ?
+                            ORDER BY timestamp DESC LIMIT 1) as last_bal
+                    FROM balance_snapshots bs
+                    WHERE uid IN ({placeholders}) AND timestamp >= ?
+                    GROUP BY uid""",
+                (since, since, *uids, since),
+            ).fetchall()
+        result: dict[str, float] = {}
+        for r in rows:
+            first = r["first_bal"]
+            last = r["last_bal"]
+            if first is not None and last is not None:
+                consumption = max(0.0, first - last)
+                result[r["uid"]] = round(consumption, 4)
+        return result
+
     def get_aggregated_usage(self, api_key_hash: str, since: float) -> AggregatedUsage:
         with self._get_conn() as conn:
             row = conn.execute(
@@ -227,7 +271,12 @@ class UsageHistory:
             for r in rows
         ]
 
-    def get_account_usage_summary(self, api_key_hashes: list[str], since: float) -> dict[str, int]:
+    def get_account_usage_summary(
+        self,
+        api_key_hashes: list[str],
+        since: float,
+        label_map: Optional[dict[str, str]] = None,
+    ) -> dict[str, int]:
         if not api_key_hashes:
             return {}
         placeholders = ",".join("?" * len(api_key_hashes))
@@ -239,7 +288,9 @@ class UsageHistory:
                     GROUP BY api_key_hash""",
                 (*api_key_hashes, since),
             ).fetchall()
-        result: dict[str, int] = {}
+        hash_to_tokens: dict[str, int] = {}
         for r in rows:
-            result[r["api_key_hash"]] = r["tokens"]
-        return result
+            hash_to_tokens[r["api_key_hash"]] = r["tokens"]
+        if label_map is not None:
+            return {label: hash_to_tokens.get(h, 0) for label, h in label_map.items()}
+        return hash_to_tokens

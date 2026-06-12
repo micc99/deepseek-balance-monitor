@@ -15,10 +15,19 @@ class SettingsDialog(ctk.CTkToplevel):
         "淡白色": "#ffffff",
     }
 
-    def __init__(self, parent, interval_sec: int, autostart: bool, theme: str = "dark", ripple_color: str = "#aaddff"):
+    PROXY_TARGETS = {
+        "DeepSeek": "api.deepseek.com",
+        "SiliconFlow": "api.siliconflow.cn",
+        "Moonshot": "api.moonshot.cn",
+        "OpenRouter": "openrouter.ai",
+        "智谱 GLM": "open.bigmodel.cn",
+    }
+
+    def __init__(self, parent, interval_sec: int, autostart: bool, theme: str = "dark",
+                 ripple_color: str = "#aaddff", proxy_target: str = "api.deepseek.com"):
         super().__init__(parent)
         self.title("设置")
-        self.geometry("360x400")
+        self.geometry("360x480")
         self.resizable(False, False)
         self.result = None
 
@@ -29,6 +38,10 @@ class SettingsDialog(ctk.CTkToplevel):
         reverse_colors = {v: k for k, v in self.RIPPLE_COLORS.items()}
         current_ripple_name = reverse_colors.get(ripple_color, "淡蓝色")
         self._ripple_var = tk.StringVar(value=current_ripple_name)
+
+        reverse_targets = {v: k for k, v in self.PROXY_TARGETS.items()}
+        current_target_name = reverse_targets.get(proxy_target, proxy_target)
+        self._proxy_var = tk.StringVar(value=current_target_name)
 
         self._setup_ui()
         self.grab_set()
@@ -62,6 +75,16 @@ class SettingsDialog(ctk.CTkToplevel):
         )
         ripple_menu.pack(pady=(0, 10))
 
+        ctk.CTkLabel(self, text="代理目标 (用量记录)", font=ctk.CTkFont(size=14)).pack(pady=(0, 5))
+        ctk.CTkLabel(self, text="选择后需重启程序生效", font=ctk.CTkFont(size=11), text_color="gray").pack()
+        proxy_menu = ctk.CTkOptionMenu(
+            self,
+            values=list(self.PROXY_TARGETS.keys()),
+            variable=self._proxy_var,
+            width=150
+        )
+        proxy_menu.pack(pady=(5, 10))
+
         autostart_frame = ctk.CTkFrame(self, fg_color="transparent")
         autostart_frame.pack(pady=(0, 15))
         self._autostart_cb = ctk.CTkCheckBox(
@@ -79,13 +102,15 @@ class SettingsDialog(ctk.CTkToplevel):
             val = int(self._interval_var.get().strip())
             theme = "dark" if self._theme_var.get() == "暗黑模式" else "light"
             ripple_color = self.RIPPLE_COLORS.get(self._ripple_var.get(), "#aaddff")
-            self.result = (max(10, val), self._autostart_var.get(), theme, ripple_color)
+            proxy_target = self.PROXY_TARGETS.get(self._proxy_var.get(), self._proxy_var.get())
+            self.result = (max(10, val), self._autostart_var.get(), theme, ripple_color, proxy_target)
             self.destroy()
         except ValueError:
             pass
 
     @classmethod
-    def show(cls, parent, interval_sec: int, autostart: bool, theme: str = "dark", ripple_color: str = "#aaddff"):
-        dlg = cls(parent, interval_sec, autostart, theme, ripple_color)
+    def show(cls, parent, interval_sec: int, autostart: bool, theme: str = "dark",
+             ripple_color: str = "#aaddff", proxy_target: str = "api.deepseek.com"):
+        dlg = cls(parent, interval_sec, autostart, theme, ripple_color, proxy_target)
         dlg.wait_window()
         return dlg.result

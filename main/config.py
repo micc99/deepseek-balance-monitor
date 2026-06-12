@@ -35,6 +35,7 @@ class SettingsConfig:
     theme: str = "dark"
     autostart: bool = True
     ripple_color: str = "#aaddff"
+    proxy_target: str = "api.deepseek.com"
 
 
 @dataclass
@@ -60,6 +61,7 @@ def load_config() -> AppConfig:
         theme=s.get("theme", "dark"),
         autostart=s.get("autostart", True),
         ripple_color=s.get("ripple_color", "#aaddff"),
+        proxy_target=s.get("proxy_target", "api.deepseek.com"),
     )
     return AppConfig(accounts=accounts, window=window, settings=settings)
 

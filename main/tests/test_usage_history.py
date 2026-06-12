@@ -72,3 +72,70 @@ def test_aggregated_usage_cache_rate():
 def test_aggregated_usage_cache_rate_zero():
     ag = AggregatedUsage()
     assert ag.cache_hit_rate is None
+
+
+def test_get_account_usage_summary_label_map(history):
+    now = time.time()
+    conn = history._get_conn()
+    conn.execute(
+        "INSERT INTO token_usage (api_key_hash, timestamp, total_tokens) VALUES (?, ?, ?)",
+        (_hash_key("sk-a"), now, 500),
+    )
+    conn.execute(
+        "INSERT INTO token_usage (api_key_hash, timestamp, total_tokens) VALUES (?, ?, ?)",
+        (_hash_key("sk-b"), now, 300),
+    )
+    conn.commit()
+    conn.close()
+
+    label_map = {"Account A": _hash_key("sk-a"), "Account B": _hash_key("sk-b")}
+    result = history.get_account_usage_summary(
+        [_hash_key("sk-a"), _hash_key("sk-b")], now - 10, label_map=label_map
+    )
+
+    assert result["Account A"] == 500
+    assert result["Account B"] == 300
+
+
+def test_get_latest_balance_per_account(history):
+    now = time.time()
+    history.record_balance_snapshot("uid1", _hash_key("sk-a"), 100.0, "CNY")
+    history.record_balance_snapshot("uid1", _hash_key("sk-a"), 80.0, "CNY")
+    history.record_balance_snapshot("uid2", _hash_key("sk-b"), 50.0, "USD")
+
+    result = history.get_latest_balance_per_account(
+        ["uid1", "uid2"], now - 10
+    )
+    assert result["uid1"] == 80.0
+    assert result["uid2"] == 50.0
+
+
+def test_get_latest_balance_per_account_empty(history):
+    result = history.get_latest_balance_per_account(["uid1"], time.time() - 10)
+    assert result == {}
+
+
+def test_get_balance_consumption(history):
+    now = time.time()
+    history.record_balance_snapshot("uid1", "h1", 100.0, "CNY")
+    history.record_balance_snapshot("uid1", "h1", 80.0, "CNY")
+    history.record_balance_snapshot("uid2", "h2", 50.0, "USD")
+    history.record_balance_snapshot("uid2", "h2", 30.0, "USD")
+
+    result = history.get_balance_consumption(["uid1", "uid2"], now - 10)
+    assert result["uid1"] == 20.0
+    assert result["uid2"] == 20.0
+
+
+def test_get_balance_consumption_with_topup(history):
+    now = time.time()
+    history.record_balance_snapshot("uid1", "h1", 50.0, "CNY")
+    history.record_balance_snapshot("uid1", "h1", 200.0, "CNY")
+
+    result = history.get_balance_consumption(["uid1"], now - 10)
+    assert result["uid1"] == 0.0
+
+
+def test_get_balance_consumption_empty(history):
+    result = history.get_balance_consumption(["uid1"], time.time() - 10)
+    assert result == {}
