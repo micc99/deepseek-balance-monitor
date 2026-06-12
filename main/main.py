@@ -20,8 +20,6 @@ from instance_lock import InstanceLock
 from animations import AnimationHelper
 from balance_checker import BalanceStatus
 from usage_history import UsageHistory
-from usage_curve_window import BalanceCurveWindow
-from usage_bar_window import UsageBarWindow
 from usage_proxy import UsageProxy
 
 ctk.set_default_color_theme("blue")
@@ -277,6 +275,7 @@ class App:
 
     def _on_view_curve(self, account):
         if self.main_window and self.main_window.winfo_exists():
+            from usage_curve_window import BalanceCurveWindow
             BalanceCurveWindow(
                 self.main_window,
                 account_label=account.label,
@@ -287,6 +286,7 @@ class App:
 
     def _on_view_usage(self):
         if self.main_window and self.main_window.winfo_exists():
+            from usage_bar_window import UsageBarWindow
             UsageBarWindow(
                 self.main_window,
                 history=self._usage_history,
