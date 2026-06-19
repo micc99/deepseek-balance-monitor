@@ -17,3 +17,4 @@ docs/
 *.sqlite3
 *.log
 usage.db
+MCP_buildhelper.md
