@@ -7,6 +7,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
 
 from usage_logger import log_usage
+from error_logger import log_exception
 
 TARGET_HOST = "api.deepseek.com"  # 默认目标，可通过 UsageProxy(target_host=...) 覆盖
 PROXY_HOST = "127.0.0.1"
@@ -36,8 +37,8 @@ class _Handler(BaseHTTPRequestHandler):
         if body and is_chat:
             try:
                 is_streaming = json.loads(body).get("stream", False)
-            except Exception:
-                pass
+            except Exception as e:
+                log_exception("usage_proxy.json_parse", e)
 
         target = self.proxy_ref._target_host if self.proxy_ref else TARGET_HOST
 
@@ -79,8 +80,8 @@ class _Handler(BaseHTTPRequestHandler):
                                 d = json.loads(line[6:])
                                 if isinstance(d.get("usage"), dict):
                                     log_usage(api_key, d["usage"])
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                log_exception("usage_proxy.streaming_usage", e)
                             break
             else:
                 resp_body = resp.read()
@@ -96,8 +97,8 @@ class _Handler(BaseHTTPRequestHandler):
                         d = json.loads(resp_body)
                         if isinstance(d.get("usage"), dict):
                             log_usage(api_key, d["usage"])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_exception("usage_proxy.nonstreaming_usage", e)
         finally:
             conn.close()
 

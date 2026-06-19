@@ -4,6 +4,7 @@ from typing import Callable
 
 from balance_checker import BalanceInfo, BalanceStatus, get_provider
 from config import AppConfig, AccountConfig
+from error_logger import log_exception
 
 
 """后台余额轮询调度器。
@@ -113,5 +114,5 @@ class BalanceScheduler:
         for cb in self._callbacks:
             try:
                 cb(result)
-            except Exception:
-                pass
+            except Exception as e:
+                log_exception("scheduler._do_check.callback", e)

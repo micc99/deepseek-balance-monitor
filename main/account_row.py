@@ -9,6 +9,7 @@ from config import AccountConfig, mask_api_key
 from balance_checker import BalanceStatus, PROVIDERS
 from scheduler import BalanceResult
 from animations import AnimationHelper
+from error_logger import log_exception
 
 
 """单账户行组件。
@@ -179,8 +180,8 @@ class AccountRow(ctk.CTkFrame):
         if self._tooltip:
             try:
                 self._tooltip.destroy()
-            except Exception:
-                pass
+            except Exception as e:
+                log_exception("AccountRow._hide_tooltip", e)
             self._tooltip = None
 
     def _on_balance_enter(self, _event):

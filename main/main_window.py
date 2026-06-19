@@ -11,6 +11,7 @@ from animations import AnimationHelper
 from edit_account_dialog import EditAccountDialog
 from settings_dialog import SettingsDialog
 from account_row import AccountRow
+from error_logger import log_exception
 
 
 """主窗口：账户列表管理、余额显示、设置入口。
@@ -94,7 +95,8 @@ class MainWindow(ctk.CTk):
                 return
         try:
             focused = self.focus_get()
-        except (KeyError, Exception):
+        except (KeyError, Exception) as e:
+            log_exception("MainWindow._focus_check_loop", e)
             focused = None
         if focused is None or not self._is_self_or_descendant(focused):
             self._cancel_focus_check()
@@ -262,7 +264,8 @@ class MainWindow(ctk.CTk):
         for i, row in enumerate(self._account_rows):
             try:
                 mid = row.winfo_rooty() + row.winfo_height() / 2
-            except Exception:
+            except Exception as e:
+                log_exception("MainWindow._on_drag_motion", e)
                 continue
             dist = abs(mouse_y - mid)
             if dist < min_dist:
@@ -315,8 +318,8 @@ class MainWindow(ctk.CTk):
         if self._drag_indicator is not None:
             try:
                 self._drag_indicator.destroy()
-            except Exception:
-                pass
+            except Exception as e:
+                log_exception("MainWindow._hide_drag_indicator", e)
             self._drag_indicator = None
 
     def _commit_drag(self):

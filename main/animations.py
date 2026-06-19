@@ -2,6 +2,8 @@ import math
 import tkinter as tk
 import customtkinter as ctk
 
+from error_logger import log_exception
+
 
 """UI 动画工具类（纯静态方法）。
 
@@ -144,5 +146,5 @@ class AnimationHelper:
                 canvas.after(delay, _animate, radius + step_size, progress - 0.05)
 
             _animate(0, 0.4)
-        except Exception:
-            pass
+        except Exception as e:
+            log_exception("AnimationHelper._create_ripple", e)

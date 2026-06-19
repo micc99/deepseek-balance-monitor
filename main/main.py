@@ -1,4 +1,4 @@
-__version__ = "1.9.2"
+__version__ = "1.9.3"
 
 import ctypes
 import json
@@ -15,6 +15,7 @@ if sys.platform == "win32":
     import keyboard
 
 from config import load_config, save_config
+from error_logger import log_exception
 from scheduler import BalanceScheduler, BalanceResult
 from main_window import MainWindow
 from floating_window import FloatingWindow
@@ -46,7 +47,8 @@ def _send_show_signal() -> bool:
         s.sendall(b"show")
         s.close()
         return True
-    except Exception:
+    except Exception as e:
+        log_exception("_send_show_signal", e)
         return False
 
 
@@ -84,8 +86,8 @@ def _set_autostart(enable: bool):
             os.remove(lnk_path)
         except FileNotFoundError:
             pass
-        except Exception:
-            pass
+        except Exception as e:
+            log_exception("_set_autostart", e)
 
 
 def _is_autostart_enabled() -> bool:
@@ -111,7 +113,8 @@ def _load_active_keys() -> set[str]:
                     for entry in data.values()
                     if isinstance(entry, dict) and "key" in entry
                 }
-            except Exception:
+            except Exception as e:
+                log_exception("_load_active_keys", e)
                 continue
     return set()
 
@@ -157,8 +160,8 @@ class App:
         if sys.platform == "win32":
             try:
                 keyboard.add_hotkey("ctrl+shift+b", self._toggle_window)
-            except Exception:
-                pass
+            except Exception as e:
+                log_exception("App.__init__.keyboard", e)
         self._proxy_url = self._usage_proxy.proxy_url
         self.main_window: MainWindow | None = None
         self.floating_window: FloatingWindow | None = None
@@ -181,7 +184,8 @@ class App:
                         self._handle_show_signal()
                 except socket.timeout:
                     continue
-                except Exception:
+                except Exception as e:
+                    log_exception("_start_ipc_listener", e)
                     continue
             s.close()
 
@@ -415,8 +419,8 @@ class App:
             self._tray_thread.start()
         except ImportError:
             pass
-        except Exception:
-            pass
+        except Exception as e:
+            log_exception("_start_tray", e)
 
     def _quit(self):
         self._exiting = True
@@ -427,8 +431,8 @@ class App:
         if self._tray_icon:
             try:
                 self._tray_icon.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                log_exception("_quit.tray_stop", e)
 
         try:
             if self.main_window:
@@ -436,16 +440,16 @@ class App:
                 self.main_window.destroy()
             if self.floating_window and self.floating_window.winfo_exists():
                 self.floating_window.destroy()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exception("_quit.window_destroy", e)
 
         self._usage_proxy.stop()
         self._cleanup_lock()
         if sys.platform == "win32":
             try:
                 keyboard.unhook_all()
-            except Exception:
-                pass
+            except Exception as e:
+                log_exception("_quit.keyboard_unhook", e)
         os._exit(0)
 
 
