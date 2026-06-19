@@ -71,9 +71,15 @@ class BaseProvider(ABC):
         ...
 
     def _make_request(self, url: str, api_key: str, timeout: int = 10) -> BalanceInfo:
-        """通用 GET 请求 + 错误处理，子类只需提供 URL 和 _parse_response。"""
+        """通用 GET 请求 + 错误处理，子类只需提供 URL 和 _parse_response。
+
+        显式禁用系统代理读取（trust_env=False），避免被 Steam++ 等游戏加速器
+        修改的系统代理设置影响，导致 API 请求无法正常到达目标服务器。
+        """
         try:
-            resp = requests.get(
+            session = requests.Session()
+            session.trust_env = False  # 绕过系统代理设置
+            resp = session.get(
                 url,
                 headers={"Authorization": f"Bearer {api_key}"},
                 timeout=timeout,
