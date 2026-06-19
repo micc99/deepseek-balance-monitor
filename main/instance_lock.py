@@ -1,5 +1,3 @@
-import ctypes
-import ctypes.wintypes
 import sys
 
 """Windows 单实例互斥锁。
@@ -8,6 +6,10 @@ import sys
 第二个进程启动时检测到已存在则发送 IPC 信号并退出。
 非 Windows 平台直接放行。
 """
+
+if sys.platform == "win32":
+    import ctypes
+    import ctypes.wintypes
 
 ERROR_ALREADY_EXISTS = 183
 

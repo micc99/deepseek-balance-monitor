@@ -2,12 +2,24 @@ name: Build and Release
 on:
   push:
     tags:
-      - "v*"           # 推送 v1.0、v2.0 等标签时触发
+      - "v*"
 permissions:
   contents: write
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: DeepSeekBalanceMonitor-windows.exe
+            pyinstaller_args: --onefile --windowed --icon=deepseek-balance-monitor.ico
+          - os: macos-latest
+            artifact_name: DeepSeekBalanceMonitor-macos
+            pyinstaller_args: --onefile --windowed
+          - os: ubuntu-latest
+            artifact_name: DeepSeekBalanceMonitor-linux
+            pyinstaller_args: --onefile
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python 3.10
@@ -19,12 +31,20 @@ jobs:
           cd main
           pip install pyinstaller pillow
           pip install -r requirements.txt
-          pip install pyinstaller
-      - name: Build exe
+      - name: Build executable
         run: |
           cd main
-          pyinstaller --onefile --windowed --icon=deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor" main.py
+          pyinstaller ${{ matrix.pyinstaller_args }} --name "DeepSeekBalanceMonitor" main.py
+      - name: Rename artifact (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mv main/dist/DeepSeekBalanceMonitor main/dist/${{ matrix.artifact_name }}
+          chmod +x main/dist/${{ matrix.artifact_name }}
+      - name: Rename artifact (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mv main/dist/DeepSeekBalanceMonitor.exe main/dist/${{ matrix.artifact_name }}
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: main/dist/DeepSeekBalanceMonitor.exe
+          files: main/dist/${{ matrix.artifact_name }}

@@ -1,4 +1,4 @@
-__version__ = "1.9.1"
+__version__ = "1.9.2"
 
 import ctypes
 import json
@@ -10,7 +10,9 @@ import time
 from datetime import datetime
 
 import customtkinter as ctk
-import keyboard
+
+if sys.platform == "win32":
+    import keyboard
 
 from config import load_config, save_config
 from scheduler import BalanceScheduler, BalanceResult
@@ -152,10 +154,11 @@ class App:
         # 代理目标从配置读取，用户可在设置中切换 provider（需重启生效）
         self._usage_proxy = UsageProxy(target_host=self.config.settings.proxy_target)
         self._usage_proxy.start()
-        try:
-            keyboard.add_hotkey("ctrl+shift+b", self._toggle_window)
-        except Exception:
-            pass
+        if sys.platform == "win32":
+            try:
+                keyboard.add_hotkey("ctrl+shift+b", self._toggle_window)
+            except Exception:
+                pass
         self._proxy_url = self._usage_proxy.proxy_url
         self.main_window: MainWindow | None = None
         self.floating_window: FloatingWindow | None = None
@@ -438,10 +441,11 @@ class App:
 
         self._usage_proxy.stop()
         self._cleanup_lock()
-        try:
-            keyboard.unhook_all()
-        except Exception:
-            pass
+        if sys.platform == "win32":
+            try:
+                keyboard.unhook_all()
+            except Exception:
+                pass
         os._exit(0)
 
 
