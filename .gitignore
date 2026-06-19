@@ -9,7 +9,7 @@ build/
 *.spec
 docs/
 
-# 敏感文件
+.pytest_cache/
 .env
 .env.*
 *.db
