@@ -8,3 +8,12 @@ dist/
 build/
 *.spec
 docs/
+
+# 敏感文件
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+*.log
+usage.db
