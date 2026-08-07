@@ -435,8 +435,7 @@ class MainWindow(ctk.CTk):
         self.status_label.configure(text=text)
 
     def _on_settings(self):
-        # ISSUE-SEC-05：传入 active_key_sources 与已脱敏的代理 token hash
-        # token hash 仅用于展示，便于用户排查客户端配置
+        # ISSUE-SEC-04：传入已脱敏的代理 token hash，便于用户排查客户端配置
         from usage_proxy import _hash_token
         proxy_token_display = ""
         if hasattr(self, "_proxy_token_provider"):
@@ -452,18 +451,15 @@ class MainWindow(ctk.CTk):
             self._config.settings.theme,
             self._config.settings.ripple_color,
             self._config.settings.proxy_target,
-            active_key_sources=self._config.settings.active_key_sources,
             proxy_token_display=proxy_token_display,
         )
         if result is not None:
-            # ISSUE-SEC-05：返回值含 active_key_sources 列表
-            interval, autostart, theme, ripple_color, proxy_target, active_key_sources = result
+            interval, autostart, theme, ripple_color, proxy_target = result
             self._config.settings.interval_sec = interval
             self._config.settings.autostart = autostart
             self._config.settings.theme = theme
             self._config.settings.ripple_color = ripple_color
             self._config.settings.proxy_target = proxy_target
-            self._config.settings.active_key_sources = list(active_key_sources)
             AnimationHelper.set_ripple_color(ripple_color)
             self._update_interval_label()
             if self._settings_callback:

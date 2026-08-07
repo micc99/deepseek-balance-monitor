@@ -252,7 +252,6 @@ def test_settings_config_defaults():
     assert s.theme == "dark"
     assert s.proxy_target == "api.deepseek.com"
     assert s.log_level == "INFO"
-    assert s.active_key_sources == []
     assert s.proxy_token_enc == ""
 
 

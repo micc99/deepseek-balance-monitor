@@ -88,14 +88,8 @@ class SettingsConfig:
     ripple_color: str = "#aaddff"
     proxy_target: str = "api.deepseek.com"  # 代理转发目标，改为其他 provider 域名即可记录其用量
     log_level: str = "INFO"  # 日志级别：DEBUG / INFO / WARN / ERROR
-    # 凭证源显式授权清单（ISSUE-SEC-05）：仅这些路径的 key 字段用于活跃账户标识
-    active_key_sources: list[str] = field(default_factory=list)
     # usage_proxy 鉴权 token（DPAPI 加密后的 base64 字符串，ISSUE-SEC-04）
     proxy_token_enc: str = ""
-
-    def __post_init__(self):
-        """防御性复制 list 字段，避免外部修改影响配置内部状态。"""
-        self.active_key_sources = list(self.active_key_sources)
 
 
 @dataclass
@@ -145,7 +139,6 @@ def load_config() -> AppConfig:
         ripple_color=s.get("ripple_color", "#aaddff"),
         proxy_target=s.get("proxy_target", "api.deepseek.com"),
         log_level=s.get("log_level", "INFO"),
-        active_key_sources=list(s.get("active_key_sources", [])),
         proxy_token_enc=s.get("proxy_token_enc", ""),
     )
     return AppConfig(accounts=accounts, window=window, settings=settings)

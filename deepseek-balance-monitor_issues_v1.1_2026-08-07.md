@@ -163,7 +163,7 @@
 
 ---
 
-### ISSUE-SEC-05 · 移除第三方凭证静默读取
+### ISSUE-SEC-05 · 移除第三方凭证静默读取 ｜ 已移除（用户决策：仅使用 config.json 账户配置，无需第三方凭证源）
 
 - **里程碑 / 优先级**：M1 / P0
 - **模块**：安全（SEC）
@@ -172,11 +172,15 @@
 
 > **v1.1 调整**：删除原依赖 ISSUE-ARC-03。直接在 dataclass 上新增 `active_key_sources` 字段。
 
+> **状态变更（2026-08-07）**：本 Issue 已整体移除，不再实现凭证源管理功能。用户决策：仅使用 config.json 中的账户配置查询余额，无需读取第三方凭证文件。下方任务清单与验收标准保留作为历史记录。
+
 #### 用户故事
 作为用户，我希望程序不会在我不知情的情况下读取桌面或第三方工具的凭证文件，所有凭证导入需我显式授权。
 
 #### 当前状态
-**已完成**。[main.py](file:///d:/#MCP-Serve/deepseek-balance-monitor/main/main.py) `_load_active_keys` 默认扫描 `Desktop\auth.json`、`opencode\auth.json`，用户无感知。Desktop 路径存在注入风险（恶意程序可放置伪造文件）。
+**已移除（用户决策：仅使用 config.json 账户配置，无需第三方凭证源）**。本 Issue 整体移除，不再实现凭证源管理功能，下方任务清单与验收标准保留作为历史记录。
+
+历史现状（移除前）：[main.py](file:///d:/#MCP-Serve/deepseek-balance-monitor/main/main.py) `_load_active_keys` 默认扫描 `Desktop\auth.json`、`opencode\auth.json`，用户无感知。Desktop 路径存在注入风险（恶意程序可放置伪造文件）。
 
 #### 任务清单
 - [x] 删除 `_load_active_keys` 中对默认路径的扫描逻辑

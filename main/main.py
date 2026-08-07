@@ -26,8 +26,7 @@ from animations import AnimationHelper
 from balance_checker import BalanceStatus
 from usage_history import UsageHistory
 from usage_proxy import UsageProxy
-# ISSUE-SEC-05 / ISSUE-ARC-05：纯逻辑函数抽离到独立模块，便于无 GUI 环境单元测试
-from credential_sources import load_authorized_active_keys as _load_authorized_active_keys
+# ISSUE-ARC-05：纯逻辑函数抽离到独立模块，便于无 GUI 环境单元测试
 from shortcut_util import validate_shortcut_path as _validate_shortcut_path, create_shortcut as _create_shortcut
 
 logger = get_logger(__name__)
@@ -133,7 +132,6 @@ class App:
         AnimationHelper.set_ripple_color(self.config.settings.ripple_color)
 
         self.scheduler = BalanceScheduler(self.config)
-        self._active_keys: set[str] = _load_authorized_active_keys(self.config)
         self._usage_history = UsageHistory()
         # 代理目标从配置读取，用户可在设置中切换 provider（需重启生效）
         # 鉴权 token 从配置读取（DPAPI 加密），首次启动自动生成
@@ -308,9 +306,8 @@ class App:
         if not self.floating_window or not self.floating_window.winfo_exists():
             return
 
-        active_uids = {
-            acc.uid for acc in self.config.accounts if acc.api_key in self._active_keys
-        }
+        # 所有 config.json 中的账户均视为活跃账户
+        active_uids = {acc.uid for acc in self.config.accounts}
         results = self.scheduler.last_results
         active_parts = []
         other_parts = []

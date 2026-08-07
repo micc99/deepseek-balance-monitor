@@ -55,27 +55,7 @@ print(f"config.json 含 api_key_enc: {'api_key_enc' in saved_text}")
 loaded = load_config()
 print(f"重载后 api_key 还原: {loaded.accounts[0].api_key == 'sk-real-key-for-persistence'}")
 
-# --- 3. 凭证源显式授权 (ISSUE-SEC-05) ---
-from credential_sources import load_authorized_active_keys
-
-print("\n=== ISSUE-SEC-05 凭证源显式授权 ===")
-cred_file = os.path.join(tmpdir, "auth.json")
-with open(cred_file, "w", encoding="utf-8") as f:
-    import json
-    json.dump({"acc1": {"key": "sk-cred-source-key"}}, f)
-
-cfg_auth = AppConfig(
-    accounts=[],
-    settings=SettingsConfig(active_key_sources=[cred_file]),
-)
-keys = load_authorized_active_keys(cfg_auth)
-print(f"授权路径 key 被读取: {'sk-cred-source-key' in keys}")
-
-cfg_empty = AppConfig(accounts=[], settings=SettingsConfig())
-keys_empty = load_authorized_active_keys(cfg_empty)
-print(f"默认不读取任何凭证: {keys_empty == set()}")
-
-# --- 4. 快捷方式路径校验 (ISSUE-ARC-05) ---
+# --- 3. 快捷方式路径校验 (ISSUE-ARC-05) ---
 from shortcut_util import validate_shortcut_path
 
 print("\n=== ISSUE-ARC-05 快捷方式注入修复 ===")
@@ -88,7 +68,8 @@ print(f"相对路径拒绝: {validate_shortcut_path(rel_path) is False}")
 print(f"含分号拒绝: {validate_shortcut_path(semicolon_path) is False}")
 print(f"含单引号通过: {validate_shortcut_path(quote_path) is True}")
 
-# --- 5. 代理鉴权 (ISSUE-SEC-04) ---
+# --- 4. 代理鉴权 (ISSUE-SEC-04) ---
+# 编号已调整：凭证源管理功能已移除
 from usage_proxy import UsageProxy
 
 print("\n=== ISSUE-SEC-04 代理鉴权与白名单 ===")
@@ -97,6 +78,7 @@ print(f"默认白名单含 5 个 provider: {len(proxy.get_whitelist()) >= 5}")
 print(f"token 已生成: {bool(proxy.proxy_token_enc)}")
 
 # --- 6. 旧版明文配置检测 (ISSUE-SEC-01 AC6) ---
+import json
 print("\n=== ISSUE-SEC-01 AC6 旧版明文配置检测 ===")
 legacy_config = os.path.join(tmpdir, "legacy_config.json")
 with open(legacy_config, "w", encoding="utf-8") as f:
