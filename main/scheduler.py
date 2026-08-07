@@ -1,10 +1,10 @@
+import logging
 import threading
 import time
 from typing import Callable
 
 from balance_checker import BalanceInfo, BalanceStatus, get_provider
 from config import AppConfig, AccountConfig
-from error_logger import log_exception
 
 
 """后台余额轮询调度器。
@@ -12,6 +12,8 @@ from error_logger import log_exception
 独立线程按配置间隔逐一检查所有账户余额，
 结果通过回调推送给 UI 层，同时缓存在 _last_results 供悬浮窗读取。
 """
+
+logger = logging.getLogger(__name__)
 
 
 class BalanceResult:
@@ -115,4 +117,4 @@ class BalanceScheduler:
             try:
                 cb(result)
             except Exception as e:
-                log_exception("scheduler._do_check.callback", e)
+                logger.exception("scheduler._do_check.callback: %s", e)

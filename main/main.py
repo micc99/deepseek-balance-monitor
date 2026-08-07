@@ -2,6 +2,7 @@ __version__ = "1.9.3"
 
 import ctypes
 import json
+import logging
 import os
 import socket
 import sys
@@ -15,6 +16,7 @@ if sys.platform == "win32":
     import keyboard
 
 from config import load_config, save_config
+from log_setup import setup_logging, get_logger
 from error_logger import log_exception
 from scheduler import BalanceScheduler, BalanceResult
 from main_window import MainWindow
@@ -24,6 +26,11 @@ from animations import AnimationHelper
 from balance_checker import BalanceStatus
 from usage_history import UsageHistory
 from usage_proxy import UsageProxy
+# ISSUE-SEC-05 / ISSUE-ARC-05：纯逻辑函数抽离到独立模块，便于无 GUI 环境单元测试
+from credential_sources import load_authorized_active_keys as _load_authorized_active_keys
+from shortcut_util import validate_shortcut_path as _validate_shortcut_path, create_shortcut as _create_shortcut
+
+logger = get_logger(__name__)
 
 ctk.set_default_color_theme("blue")
 
@@ -60,19 +67,6 @@ def _get_startup_lnk_path() -> str:
     return os.path.join(startup, "DeepSeekBalanceMonitor.lnk")
 
 
-def _create_shortcut(lnk_path: str, target: str):
-    import subprocess
-    escaped_lnk = lnk_path.replace("'", "''")
-    escaped_target = target.replace("'", "''")
-    ps_script = (
-        f"$WshShell = New-Object -ComObject WScript.Shell; "
-        f"$Shortcut = $WshShell.CreateShortcut('{escaped_lnk}'); "
-        f"$Shortcut.TargetPath = '{escaped_target}'; "
-        f"$Shortcut.Save()"
-    )
-    subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, timeout=10)
-
-
 def _set_autostart(enable: bool):
     if sys.platform != "win32":
         return
@@ -96,28 +90,6 @@ def _is_autostart_enabled() -> bool:
     return os.path.exists(_get_startup_lnk_path())
 
 
-def _load_active_keys() -> set[str]:
-    if sys.platform != "win32":
-        return set()
-    candidates = [
-        os.path.join(os.path.expandvars("%USERPROFILE%"), "Desktop", "auth.json"),
-        os.path.join(os.path.expandvars("%USERPROFILE%"), ".local", "share", "opencode", "auth.json"),
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                return {
-                    entry["key"]
-                    for entry in data.values()
-                    if isinstance(entry, dict) and "key" in entry
-                }
-            except Exception as e:
-                log_exception("_load_active_keys", e)
-                continue
-    return set()
-
 ICON_PATH = _get_resource_path(os.path.join("assets", "icon.png"))
 
 
@@ -137,6 +109,10 @@ class App:
     """
 
     def __init__(self):
+        # 日志系统必须最先初始化，确保后续所有模块可正常记录
+        # 先用默认 INFO 初始化，加载配置后再根据 log_level 调整
+        setup_logging(level="INFO", console=True)
+
         self._lock = InstanceLock(LOCK_NAME)
         if not self._lock.acquire():
             _send_show_signal()
@@ -147,15 +123,28 @@ class App:
         self._last_update_time: float = 0
 
         self.config = load_config()
+        # 应用配置中的日志级别
+        from log_setup import set_level
+        set_level(self.config.settings.log_level)
+        logger.info("应用启动，版本 %s，日志级别 %s", __version__, self.config.settings.log_level)
+
         theme = self.config.settings.theme
         ctk.set_appearance_mode(theme)
         AnimationHelper.set_ripple_color(self.config.settings.ripple_color)
 
         self.scheduler = BalanceScheduler(self.config)
-        self._active_keys: set[str] = _load_active_keys()
+        self._active_keys: set[str] = _load_authorized_active_keys(self.config)
         self._usage_history = UsageHistory()
         # 代理目标从配置读取，用户可在设置中切换 provider（需重启生效）
-        self._usage_proxy = UsageProxy(target_host=self.config.settings.proxy_target)
+        # 鉴权 token 从配置读取（DPAPI 加密），首次启动自动生成
+        self._usage_proxy = UsageProxy(
+            target_host=self.config.settings.proxy_target,
+            proxy_token_enc=self.config.settings.proxy_token_enc,
+        )
+        # 启动后若生成了新 token，回写配置
+        if self._usage_proxy.token_enc_changed:
+            self.config.settings.proxy_token_enc = self._usage_proxy.proxy_token_enc
+            save_config(self.config)
         self._usage_proxy.start()
         if sys.platform == "win32":
             try:
@@ -214,6 +203,8 @@ class App:
         self.main_window.set_save_callback(lambda: save_config(self.config))
         self.main_window.set_view_curve_callback(self._on_view_curve)
         self.main_window.set_view_usage_callback(self._on_view_usage)
+        # ISSUE-SEC-04：注入 token 提供者，供设置面板展示 token hash
+        self.main_window.set_proxy_token_provider(self._usage_proxy.get_proxy_token)
 
         if self.config.settings.autostart:
             _set_autostart(True)

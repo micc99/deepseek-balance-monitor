@@ -427,10 +427,24 @@ class MainWindow(ctk.CTk):
     def set_view_usage_callback(self, callback: Callable):
         self._on_view_usage_callback = callback
 
+    def set_proxy_token_provider(self, provider: Callable[[], str]):
+        """ISSUE-SEC-04：注入代理 token 提供者，用于设置面板展示 token hash。"""
+        self._proxy_token_provider = provider
+
     def set_status(self, text: str):
         self.status_label.configure(text=text)
 
     def _on_settings(self):
+        # ISSUE-SEC-05：传入 active_key_sources 与已脱敏的代理 token hash
+        # token hash 仅用于展示，便于用户排查客户端配置
+        from usage_proxy import _hash_token
+        proxy_token_display = ""
+        if hasattr(self, "_proxy_token_provider"):
+            try:
+                proxy_token_display = _hash_token(self._proxy_token_provider())
+            except Exception:
+                proxy_token_display = ""
+
         result = SettingsDialog.show(
             self,
             self._config.settings.interval_sec,
@@ -438,14 +452,18 @@ class MainWindow(ctk.CTk):
             self._config.settings.theme,
             self._config.settings.ripple_color,
             self._config.settings.proxy_target,
+            active_key_sources=self._config.settings.active_key_sources,
+            proxy_token_display=proxy_token_display,
         )
         if result is not None:
-            interval, autostart, theme, ripple_color, proxy_target = result
+            # ISSUE-SEC-05：返回值含 active_key_sources 列表
+            interval, autostart, theme, ripple_color, proxy_target, active_key_sources = result
             self._config.settings.interval_sec = interval
             self._config.settings.autostart = autostart
             self._config.settings.theme = theme
             self._config.settings.ripple_color = ripple_color
             self._config.settings.proxy_target = proxy_target
+            self._config.settings.active_key_sources = list(active_key_sources)
             AnimationHelper.set_ripple_color(ripple_color)
             self._update_interval_label()
             if self._settings_callback:
