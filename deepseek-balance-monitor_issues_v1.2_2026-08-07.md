@@ -1,9 +1,9 @@
 # DeepSeek 余额监控 · 可执行 Issue 清单
 
-> **文档版本**：v1.1
+> **文档版本**：v1.2
 > **文档日期**：2026-08-07
-> **源 PRD**：[deepseek-balance-monitor_PRD_v1.3_2026-08-07.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/deepseek-balance-monitor_PRD_v1.3_2026-08-07.md)
-> **配套改进方案**：[deepseek-balance-monitor_改进方案_v1.2_2026-08-07.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/deepseek-balance-monitor_改进方案_v1.2_2026-08-07.md)
+> **源 PRD**：[deepseek-balance-monitor_PRD_v1.4_2026-08-07.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/deepseek-balance-monitor_PRD_v1.4_2026-08-07.md)
+> **配套改进方案**：[deepseek-balance-monitor_改进方案_v1.3_2026-08-07.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/deepseek-balance-monitor_改进方案_v1.3_2026-08-07.md)
 > **文档目的**：将 PRD 中的需求拆分为可直接领取执行的工作项（Issue），每个 Issue 含任务清单、验收标准、依赖关系与执行要点
 > **语言**：简体中文（技术术语保留英文原文）
 > **命名规范**：`ISSUE-<模块缩写>-<序号>`，与 PRD 需求 ID 一一对应
@@ -22,6 +22,13 @@
 > - 别名 FR-CFG-01（原指向 ISSUE-ARC-03）一并删除
 > - Issue 总数由 57 项减少至 50 项（含 6 项非功能/风险跟踪）
 > - v1.0 的源 PRD 引用由 v1.2 更新为 v1.3
+
+> **v1.2 变更说明**：
+> - ISSUE-SEC-05（移除第三方凭证静默读取）整体移除（用户决策：仅使用 config.json 账户配置，无需第三方凭证源）
+> - 连锁调整：ISSUE-SEC-04 别名引用 FR-CFG-03 的 `active_key_sources` 字段关系失效（原依赖 ISSUE-SEC-05 实现）
+> - M2 里程碑 PFM-02 启动流程去除"凭证源加载"步骤
+> - 依赖关系图、别名映射表、推荐执行顺序同步标注 ISSUE-SEC-05 已移除
+> - M1 里程碑 Issue 数由 7 项减少至 6 项，Issue 总数由 50 项减少至 49 项
 
 ---
 
@@ -58,15 +65,15 @@
 
 | 里程碑 | 版本 | Issue 数 | P0 | P1 | P2 | P3 |
 |--------|------|----------|----|----|----|----|
-| M1 | v1.10.0 | 7 | 3 | 4 | 0 | 0 |
+| M1 | v1.10.0 | 6 | 2 | 4 | 0 | 0 |
 | M2 | v1.11.0 | 11 | 0 | 11 | 0 | 0 |
 | M3 | v1.12.0 | 17 | 0 | 4 | 13 | 0 |
 | M4 | v2.0.0 | 6 | 0 | 4 | 2 | 0 |
 | M5+ | v2.x | 3 | 0 | 0 | 0 | 3 |
 | 非功能/风险跟踪 | — | 6 | — | — | — | — |
-| **合计** | — | **50** | **3** | **23** | **15** | **3** |
+| **合计** | — | **49** | **2** | **23** | **15** | **3** |
 
-> 说明：PRD 中 2 个引用别名（FR-CFG-03=FR-SEC-04、FR-QA-03=FR-PFM-07）不单独建立 Issue，在对应主 Issue 中标注。ISSUE-MIGRATE-PyQt6 为改进方案衍生的技术栈迁移 Issue，不直接对应 PRD 功能需求 ID。功能 Issue 共 44 项（43 项 PRD 映射 + 1 项迁移评估），加 6 项非功能/风险跟踪合计 50 项。
+> 说明：PRD 中 2 个引用别名（FR-CFG-03=FR-SEC-04、FR-QA-03=FR-PFM-07）不单独建立 Issue，在对应主 Issue 中标注。ISSUE-MIGRATE-PyQt6 为改进方案衍生的技术栈迁移 Issue，不直接对应 PRD 功能需求 ID。功能 Issue 共 43 项（42 项 PRD 映射 + 1 项迁移评估），加 6 项非功能/风险跟踪合计 49 项。ISSUE-SEC-05 已移除，保留为历史记录，不计入统计。
 
 ---
 
@@ -126,7 +133,7 @@
 - **模块**：安全（SEC）
 - **依赖需求**：ISSUE-SEC-01、ISSUE-PROV-02（白名单同步）
 - **关联改进项**：S-3
-- **别名**：FR-CFG-03 中的 `active_key_sources` 字段在 ISSUE-SEC-05 实现
+- **别名**：FR-CFG-03 中的 `active_key_sources` 字段在 ISSUE-SEC-05 实现（ISSUE-SEC-05 已移除，此别名关系失效）
 
 #### 用户故事
 作为用户，我希望本地反向代理仅接受我授权的客户端请求，且代理目标限定在已知 AI 平台，防止被借用消耗额度或转发到任意主机。
@@ -389,7 +396,7 @@
 
 #### 任务清单
 - [ ] `App.__init__` 仅创建 `MainWindow`（空账户列表），不执行磁盘 IO
-- [ ] 启动后台线程执行：load_config → 凭证源加载 → UsageHistory 建表 → UsageProxy 启动
+- [ ] 启动后台线程执行：load_config → UsageHistory 建表 → UsageProxy 启动
 - [ ] 后台加载完成后通过 `main_window.after(0, ...)` 回填账户列表并触发首次刷新
 - [ ] 首屏空状态 UI：200-400ms 内无数据，显示"加载中..."友好提示
 - [ ] 后台加载失败时 UI 显示错误状态，不崩溃
@@ -1724,7 +1731,7 @@ ISSUE-LOG-01 (统一日志)
 ISSUE-SEC-01 (DPAPI 加密，无依赖)
 └── ISSUE-SEC-04 (代理鉴权) ── 依赖 ── ISSUE-PROV-02 (白名单同步)
 
-ISSUE-SEC-05 (凭证源，无依赖)
+ISSUE-SEC-05 (已移除)
 
 ISSUE-PFM-03 (线程池)
 ├── ISSUE-PFM-04 (Session 复用)
@@ -1767,7 +1774,7 @@ ISSUE-QA-01 (CI 测试)
 
 | PRD 需求 ID | 对应 Issue ID | 说明 |
 |-------------|---------------|------|
-| FR-CFG-03 | ISSUE-SEC-04 | 凭证源显式管理（active_key_sources 字段） |
+| FR-CFG-03 | ISSUE-SEC-05（已移除） | 凭证源显式管理（已随 SEC-05 移除） |
 | FR-QA-03 | ISSUE-PFM-07 | 性能基准 CI 门禁 |
 
 > **v1.1 调整**：移除 FR-CFG-01 → ISSUE-ARC-03 别名映射（两者均已删除）。
@@ -1782,7 +1789,7 @@ ISSUE-QA-01 (CI 测试)
    - ISSUE-LOG-01 → ISSUE-LOG-02 → ISSUE-SEC-07
    - ISSUE-SEC-01（无依赖，可先行；含旧版明文配置检测提示）
    - ISSUE-SEC-04（白名单接口先行，PROV-02 联调待 M3）
-   - ISSUE-SEC-05、ISSUE-ARC-05（独立可并行）
+   - ISSUE-SEC-05（已移除）、ISSUE-ARC-05（独立可并行）
 
 2. **M2 性能并发**
    - ISSUE-PFM-01、ISSUE-PFM-02（独立可并行）

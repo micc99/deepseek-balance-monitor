@@ -1,10 +1,10 @@
 # DeepSeek 余额监控 · 产品需求文档（PRD）
 
-> **文档版本**：v1.3
+> **文档版本**：v1.4
 > **文档日期**：2026-08-07
 > **适用产品**：deepseek-balance-monitor（当前发布版本 v1.9.3）
 > **文档目的**：作为产品规划与 AI 协作交接的权威需求基线，指导 v1.10 ~ v2.x 版本的研发推进
-> **配套文档**：[deepseek-balance-monitor_改进方案_v1.2_2026-08-07.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/deepseek-balance-monitor_改进方案_v1.2_2026-08-07.md)（以下简称"改进方案"）
+> **配套文档**：[deepseek-balance-monitor_改进方案_v1.3_2026-08-07.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/deepseek-balance-monitor_改进方案_v1.3_2026-08-07.md)（以下简称"改进方案"）
 > **语言**：简体中文（技术术语保留英文原文）
 > **v1.3 变更说明**：
 > - 基于用户决策删除以下需求（用户无对应需求）：
@@ -164,7 +164,7 @@ deepseek-balance-monitor/
 │   └── tests/
 ├── .github/workflows/release.yml
 ├── README.md
-└── deepseek-balance-monitor_改进方案_v1.2_2026-08-07.md
+└── deepseek-balance-monitor_改进方案_v1.3_2026-08-07.md
 ```
 
 ### 2.3 已实现功能（现状基线）
@@ -185,7 +185,7 @@ deepseek-balance-monitor/
 
 ### 2.4 核心技术债（详见改进方案）
 
-1. **安全**：API Key 明文存储；本地代理无鉴权；静默读取第三方凭证
+1. **安全**：API Key 明文存储；本地代理无鉴权
 2. **性能**：启动同步加载 matplotlib；调度器每账户新建线程；焦点 500ms 轮询
 3. **架构**：App 类职责过重；MainWindow 回调注入耦合
 4. **主题**：仅 dark/light；颜色硬编码散落各处；不满足莫奈色需求
@@ -231,21 +231,21 @@ deepseek-balance-monitor/
 
 | 模块 | 独立需求数 | P0 | P1 | P2 | P3 | 备注 |
 |------|--------|----|----|----|----|------|
-| 安全（SEC） | 5 | 3 | 2 | 0 | 0 | 含加密/代理鉴权/凭证源/hash 升级/日志脱敏 |
+| 安全（SEC） | 4 | 2 | 2 | 0 | 0 | 含加密/代理鉴权/hash 升级/日志脱敏 |
 | 性能（PFM） | 8 | 0 | 7 | 1 | 0 | 含延迟加载/异步化/线程池/事件驱动/行级解析/基准/WAL |
 | 架构（ARC） | 5 | 0 | 5 | 0 | 0 | 含 App 拆分/事件总线/数字健壮/快捷方式/接口抽象 |
 | 并发网络（NET） | 3 | 0 | 3 | 0 | 0 | 含任务取消/多线程服务/重试 |
 | 日志（LOG） | 3 | 0 | 3 | 0 | 0 | 含轮转/分级/优雅退出 |
-| 配置（CFG） | 1 | 0 | 0 | 1 | 0 | FR-CFG-03=FR-SEC-04 为别名 |
+| 配置（CFG） | 0 | 0 | 0 | 0 | 0 | FR-CFG-03 随 FR-SEC-05 移除 |
 | UX | 4 | 0 | 0 | 4 | 0 | 含 i18n/快捷键/失焦/颜色集中 |
 | 主题（THM） | 5 | 0 | 0 | 5 | 0 | 含数据模型/Manager/莫奈色/扩展接口/编辑器 |
 | 供应商扩展（PROV） | 4 | 0 | 1 | 3 | 0 | 含注册机制/配置化/自动发现/SDK 文档 |
 | 质量保障（QA） | 2 | 0 | 2 | 0 | 0 | FR-QA-03=FR-PFM-07 为别名 |
 | 打包分发（PKG） | 1 | 0 | 1 | 0 | 0 | 含打包模式 |
 | 新功能（FEAT） | 2 | 0 | 0 | 0 | 2 | 含报告/多币种 |
-| **合计** | **43** | **3** | **24** | **14** | **2** | 含 2 个引用别名共 46 个标题项 |
+| **合计** | **42** | **2** | **24** | **13** | **2** | 含 1 个引用别名共 44 个标题项（FR-SEC-05、FR-CFG-03 已移除） |
 
-> 矩阵统计**独立需求**43 项；文档中以标题列出的需求项共 46 个（含 FR-CFG-03、FR-QA-03 两个引用别名，指向其他需求，不重复验收）。
+> 矩阵统计**独立需求**42 项；文档中以标题列出的需求项共 44 个（含 FR-QA-03 一个引用别名，指向其他需求，不重复验收；FR-SEC-05、FR-CFG-03 已移除，原文保留作历史记录）。
 
 ### 4.2 非功能需求矩阵
 
@@ -319,10 +319,12 @@ deepseek-balance-monitor/
 - **所属里程碑**：M1
 - **依赖需求**：FR-SEC-01、FR-PROV-02
 
-#### FR-SEC-05 · 移除第三方凭证静默读取
+#### FR-SEC-05 · 移除第三方凭证静默读取 ｜ 已移除（用户决策：仅使用 config.json 账户配置，无需第三方凭证源）
+
+> **状态变更（2026-08-07）**：本需求已整体移除。用户决策：仅使用 config.json 中的账户配置查询余额，无需读取第三方凭证文件。下方描述保留作为历史记录。
 
 - **用户故事**：作为用户，我希望程序不会在我不知情的情况下读取桌面或第三方工具的凭证文件，所有凭证导入需我显式授权。
-- **当前状态**：**未实现**。[main.py](file:///d:/#MCP-Serve/deepseek-balance-monitor/main/main.py) 第 99-119 行 `_load_active_keys` 默认扫描 `Desktop\auth.json`、`opencode\auth.json`，用户无感知。Desktop 路径存在注入风险（恶意程序可放置伪造文件）。
+- **当前状态**：**已移除（用户决策：仅使用 config.json 账户配置，无需第三方凭证源）**。[main.py](file:///d:/#MCP-Serve/deepseek-balance-monitor/main/main.py) 第 99-119 行 `_load_active_keys` 默认扫描 `Desktop\auth.json`、`opencode\auth.json`，用户无感知。Desktop 路径存在注入风险（恶意程序可放置伪造文件）。
 - **详细描述**：
   - **移除默认扫描**：删除 `_load_active_keys` 中对默认路径的扫描逻辑
   - **显式导入**：设置面板新增"导入凭证源"功能，用户点击后弹出文件选择对话框
@@ -403,10 +405,10 @@ deepseek-balance-monitor/
 #### FR-PFM-02 · 启动期 IO 与建表异步化
 
 - **用户故事**：作为用户，我希望应用启动后首屏迅速可见，后台数据加载不阻塞界面。
-- **当前状态**：**未实现**。[main.py](file:///d:/#MCP-Serve/deepseek-balance-monitor/main/main.py) `App.__init__` 同步执行 `load_config`（磁盘读）、`_load_active_keys`（磁盘读）、`UsageHistory()`（SQLite 建表）、`UsageProxy.start()`（端口绑定）。
+- **当前状态**：**未实现**。[main.py](file:///d:/#MCP-Serve/deepseek-balance-monitor/main/main.py) `App.__init__` 同步执行 `load_config`（磁盘读）、`UsageHistory()`（SQLite 建表）、`UsageProxy.start()`（端口绑定）。
 - **详细描述**：
   - **首屏优先**：`App.__init__` 仅创建 `MainWindow`（空账户列表），不执行磁盘 IO
-  - **后台线程**：启动后台线程执行：load_config → 凭证源加载 → UsageHistory 建表 → UsageProxy 启动
+  - **后台线程**：启动后台线程执行：load_config → UsageHistory 建表 → UsageProxy 启动
   - **数据回填**：后台加载完成后通过 `main_window.after(0, ...)` 回填账户列表并触发首次刷新
   - **空状态 UI**：首屏 200-400ms 内无数据，显示"加载中..."友好提示
   - **错误处理**：后台加载失败时 UI 显示错误状态，不崩溃
@@ -799,9 +801,9 @@ deepseek-balance-monitor/
 
 > **v1.3 调整**：删除原依赖 FR-ARC-03。独立实现原子写入，不依赖 schema 升级。
 
-#### FR-CFG-03 · 凭证源显式管理
+#### FR-CFG-03 · 凭证源显式管理 ｜ 已移除（随 FR-SEC-05 一并移除）
 
-- 见 FR-SEC-04（active_key_sources 字段）。
+已移除（随 FR-SEC-05 一并移除，active_key_sources 字段已删除）。
 
 ### 5.7 UX 模块
 
@@ -1412,7 +1414,6 @@ class SettingsConfig:
     auto_float_on_focus_loss: bool = False  # 失焦行为（FR-UX-04）
     language: str = "zh_CN"                 # i18n（FR-UX-01）
     proxy_token_enc: str = ""               # 代理鉴权 token（FR-SEC-04）
-    active_key_sources: list[str] = field(default_factory=list)  # 凭证源（FR-SEC-05）
     hash_algorithm: str = "sha256"          # hash 算法（FR-SEC-06）
     log_level: str = "INFO"                 # 日志级别（FR-LOG-02）
     base_currency: str = "CNY"              # 基准货币（FR-FEAT-04）
@@ -1638,7 +1639,7 @@ App（编排器，仅生命周期）
 
 ### 10.2 参考文档
 
-- [改进方案 v1.2](file:///d:/#MCP-Serve/deepseek-balance-monitor/deepseek-balance-monitor_改进方案_v1.2_2026-08-07.md) — 技术实现细节、迁移步骤、风险分析
+- [改进方案 v1.3](file:///d:/#MCP-Serve/deepseek-balance-monitor/deepseek-balance-monitor_改进方案_v1.3_2026-08-07.md) — 技术实现细节、迁移步骤、风险分析
 - [README.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/README.md) — 项目说明
 - [main.py](file:///d:/#MCP-Serve/deepseek-balance-monitor/main/main.py) — 应用入口
 - [config.py](file:///d:/#MCP-Serve/deepseek-balance-monitor/main/config.py) — 配置模型
@@ -1668,13 +1669,15 @@ App（编排器，仅生命周期）
 | FR-ARC-05 | A-5 | FR-FEAT-03 | F-3 |
 | FR-ARC-06 | A-2 | FR-FEAT-04 | F-4 |
 | FR-NET-01 | C-2 | FR-CFG-02 | D-3 |
-| FR-NET-02 | C-3 | FR-CFG-03 | S-4 |
+| FR-NET-02 | C-3 | | |
 | FR-NET-03 | C-4 | | |
 | FR-LOG-01 | E-1 | | |
 | FR-LOG-02 | E-2 | | |
 | FR-LOG-03 | E-3 | | |
 
 > **v1.3 删除项**：FR-SEC-02（S-1 迁移部分）、FR-ARC-03（A-3/D-1）、FR-CFG-01（A-3/D-1 别名）、FR-UX-03（U-3）、FR-UX-05（U-5）、FR-PKG-02（R-2）、FR-FEAT-01（F-1）、FR-FEAT-02（F-2）、FR-NET-04（D-2）。
+
+> **v1.4 移除项**：FR-SEC-05（S-4，移除第三方凭证静默读取）、FR-CFG-03（S-4 别名，凭证源显式管理）。用户决策：仅使用 config.json 账户配置，无需第三方凭证源。独立需求由 43 项减少至 42 项。
 
 ---
 
@@ -1702,3 +1705,4 @@ App（编排器，仅生命周期）
 > 任何需求变更需同步更新本文档与改进方案，并升级版本号。
 > 技术栈迁移（第 7.6 节）需用户审批后方可实施。
 > v1.3 变更：删除 9 项需求（FR-SEC-02、FR-ARC-03、FR-CFG-01、FR-UX-03、FR-UX-05、FR-PKG-02、FR-FEAT-01、FR-FEAT-02、FR-NET-04），独立需求由 52 项减少至 43 项。
+> v1.4 变更：移除 FR-SEC-05（第三方凭证静默读取）及关联 FR-CFG-03（凭证源显式管理），独立需求由 43 项减少至 42 项。
