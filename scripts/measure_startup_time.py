@@ -19,6 +19,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -45,20 +46,28 @@ logger.addHandler(_console_handler)
 def measure_import_time():
     """使用 -X importtime 分析 import 耗时，返回前 20 名模块。
 
+    ISSUE-PFM-07：importtime 会启动 main.py 并进入 mainloop 阻塞，
+    因此设置较短超时（10s）并在超时后强制终止进程，只采集 import 阶段的输出。
+
     Returns:
         list[tuple[str, int]]: 模块名与累计耗时（微秒）的列表，按耗时降序
     """
     main_path = Path(__file__).parent.parent / "main" / "main.py"
-    result = subprocess.run(
-        [sys.executable, "-X", "importtime", str(main_path)],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        # 启动后会进入 mainloop，这里只采集 import 阶段的 stderr 输出
-        # 实际运行需配合超时强制结束
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-X", "importtime", str(main_path)],
+            capture_output=True,
+            text=True,
+            timeout=10,  # import 阶段约 1-2s，10s 超时足够；mainloop 阻塞会被强制终止
+        )
+    except subprocess.TimeoutExpired as e:
+        # 超时是预期的（mainloop 阻塞），使用已采集的 stderr 输出
+        stderr_output = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+        lines = stderr_output.splitlines()
+    else:
+        lines = result.stderr.splitlines()
+
     # importtime 输出到 stderr，格式：import time: 1234 |   567 | module.name
-    lines = result.stderr.splitlines()
     imports = []
     for line in lines:
         if "import time:" in line and "|" in line:
@@ -78,11 +87,16 @@ def measure_import_time():
 def measure_cold_startup():
     """测量冷启动耗时（毫秒）。
 
-    通过 subprocess 启动 main.py，记录从启动到进程开始运行 mainloop 的时间。
-    注意：mainloop 会阻塞，这里用超时机制采集启动阶段耗时。
+    ISSUE-PFM-07：通过读取 main.py 输出的 __STARTUP_DONE__ stdout 标记检测启动完成，
+    替代原先固定 sleep(2) 的方式，获得真实启动耗时。
+
+    main.py 在 mainloop() 调用前会输出 `__STARTUP_DONE__` 标记，
+    本函数通过后台线程实时读取 stdout，主线程等待标记出现。
+
+    注意：Windows 上 select.select 不支持 pipe 文件对象，改用线程读取。
 
     Returns:
-        float:冷启动耗时（毫秒）
+        float: 冷启动耗时（毫秒），若超时未收到标记则返回 -1
     """
     main_path = Path(__file__).parent.parent / "main" / "main.py"
     start = time.perf_counter()
@@ -90,10 +104,43 @@ def measure_cold_startup():
         [sys.executable, str(main_path)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        text=True,
     )
-    # 给进程 2 秒时间完成启动（mainloop 已进入）
-    time.sleep(2)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    # 后台线程实时读取 stdout，检测启动完成标记
+    startup_done = threading.Event()
+
+    def _read_stdout():
+        try:
+            for line in proc.stdout:
+                if "__STARTUP_DONE__" in line:
+                    startup_done.set()
+                    return
+        except Exception:
+            pass
+
+    reader_thread = threading.Thread(target=_read_stdout, daemon=True)
+    reader_thread.start()
+
+    # 等待标记或超时（30 秒）
+    if startup_done.wait(timeout=30):
+        elapsed_ms = (time.perf_counter() - start) * 1000
+    else:
+        # 诊断：检查进程是否已退出（可能是 InstanceLock 冲突）
+        exit_code = proc.poll()
+        if exit_code is not None:
+            stderr_output = proc.stderr.read() if proc.stderr else ""
+            logger.warning(
+                "    未收到 __STARTUP_DONE__ 标记（进程已退出，退出码=%s）"
+                "可能原因：InstanceLock 冲突（已有实例运行），请先关闭所有 main.py 进程",
+                exit_code,
+            )
+            if stderr_output:
+                logger.warning("    STDERR: %s", stderr_output[:500])
+        else:
+            logger.warning("    未收到 __STARTUP_DONE__ 标记（超时 30 秒）")
+        elapsed_ms = -1
+
     proc.terminate()
     try:
         proc.wait(timeout=5)
@@ -110,8 +157,12 @@ def main():
 
     logger.info("[1] 冷启动耗时测量...")
     cold_ms = measure_cold_startup()
-    logger.info("    冷启动耗时: %.0f ms", cold_ms)
-    logger.info("    目标 (< 300ms): %s", "✓ 达标" if cold_ms < 300 else "✗ 未达标")
+    if cold_ms < 0:
+        logger.info("    冷启动耗时: 测量失败（见上方警告）")
+        logger.info("    目标 (< 300ms): 无法判断")
+    else:
+        logger.info("    冷启动耗时: %.0f ms", cold_ms)
+        logger.info("    目标 (< 300ms): %s", "✓ 达标" if cold_ms < 300 else "✗ 未达标")
 
     logger.info("[2] import 耗时分析（前 20 名）...")
     try:
@@ -128,7 +179,10 @@ def main():
         logger.error("    import 分析失败: %s", e)
 
     logger.info("[3] 性能指标汇总")
-    logger.info("    - 冷启动: %.0f ms (目标 < 300ms)", cold_ms)
+    if cold_ms < 0:
+        logger.info("    - 冷启动: 测量失败（需关闭已有实例后重试）")
+    else:
+        logger.info("    - 冷启动: %.0f ms (目标 < 300ms)", cold_ms)
     logger.info("    日志已写入: %s", LOG_FILE)
     logger.info("注意：热启动、闲置内存、闲置 CPU、刷新延迟请配合 sample_resource_usage.py 使用")
     logger.info("=" * 60)

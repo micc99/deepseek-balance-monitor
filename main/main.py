@@ -151,20 +151,25 @@ class App:
 
     def _start_ipc_listener(self):
         def listen():
+            import select
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(("127.0.0.1", IPC_PORT))
             s.listen(1)
-            s.settimeout(1)
+            # ISSUE-PFM-05：改用 select.select 替代 settimeout(1) 轮询
+            # 原方案每秒唤醒一次（continue），导致闲置 CPU 基线 ~1%
+            # select.select 在无连接时真正阻塞，仅在有连接或退出信号时唤醒
             while not self._exiting:
                 try:
+                    # 0.5s 超时用于定期检查 _exiting 标志
+                    readable, _, _ = select.select([s], [], [], 0.5)
+                    if not readable:
+                        continue
                     conn, _addr = s.accept()
                     data = conn.recv(1024)
                     conn.close()
                     if data == b"show":
                         self._handle_show_signal()
-                except socket.timeout:
-                    continue
                 except Exception as e:
                     log_exception("_start_ipc_listener", e)
                     continue
@@ -204,6 +209,9 @@ class App:
         # ISSUE-PFM-02：100ms 后启动后台加载线程，让首屏先完成渲染
         self.main_window.after(100, self._deferred_init)
         self.main_window.after(500, self.main_window.start_focus_monitor)
+        # ISSUE-PFM-07：输出启动完成标记，供 measure_startup_time.py 检测真实启动耗时
+        # 标记在 mainloop() 调用前输出（此时首屏已渲染、后台线程已提交）
+        print("__STARTUP_DONE__", flush=True)
         self.main_window.mainloop()
 
     def _on_manual_refresh_during_load(self):

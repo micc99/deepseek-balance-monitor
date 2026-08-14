@@ -81,13 +81,21 @@ def sample_process(pid: int, duration: int, interval: int):
     logger.info("开始采样: PID=%d, 时长=%ds, 间隔=%ds", pid, duration, interval)
     logger.info("目标: 闲置内存 < 50MB, 闲置 CPU < 0.1%")
 
+    # ISSUE-PFM-07：先调用一次 cpu_percent() 初始化基线
+    # psutil 的 cpu_percent(interval=None) 返回自上次调用以来的 CPU 占用率
+    # 首次调用返回 0.0（无基线），需先初始化一次
+    proc.cpu_percent(interval=None)
+
     samples = []
     start = time.time()
     while time.time() - start < duration:
         try:
             mem_info = proc.memory_info()
             rss_mb = mem_info.rss / (1024 * 1024)
-            cpu_percent = proc.cpu_percent(interval=1)
+            # ISSUE-PFM-07：改用 interval=None 非阻塞模式
+            # 原方案 interval=1 会阻塞 1 秒，测量窗口恰好覆盖 IPC listener 唤醒周期，
+            # 放大 CPU 读数。非阻塞模式返回上次调用以来的平均值，更准确反映闲置状态
+            cpu_percent = proc.cpu_percent(interval=None)
             samples.append((rss_mb, cpu_percent))
             logger.info(
                 "采样: RSS=%.2f MB, CPU=%.3f%% (目标: RSS<50MB, CPU<0.1%%)",
@@ -96,7 +104,7 @@ def sample_process(pid: int, duration: int, interval: int):
         except psutil.NoSuchProcess:
             logger.warning("进程 %d 已退出", pid)
             break
-        time.sleep(max(0, interval - 1))  # cpu_percent 已等待 1 秒
+        time.sleep(interval)
 
     if not samples:
         logger.warning("无有效采样数据")
