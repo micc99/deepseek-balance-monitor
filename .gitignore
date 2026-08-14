@@ -7,7 +7,9 @@ assets/
 dist/
 build/
 *.spec
-docs/
+docs/*
+# ISSUE-PFM-07：性能基准文档需要纳入版本控制
+!docs/performance-baseline.md
 
 .pytest_cache/
 .env

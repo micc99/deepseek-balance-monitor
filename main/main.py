@@ -15,8 +15,8 @@ import customtkinter as ctk
 if sys.platform == "win32":
     import keyboard
 
-from config import load_config, save_config
-from log_setup import setup_logging, get_logger
+from config import load_config, save_config, AppConfig
+from log_setup import setup_logging, get_logger, set_level
 from error_logger import log_exception
 from scheduler import BalanceScheduler, BalanceResult
 from main_window import MainWindow
@@ -120,40 +120,34 @@ class App:
         self._pending_show = False
         self._exiting = False
         self._last_update_time: float = 0
+        # ISSUE-PFM-02：后台加载状态标记，避免退出时操作未初始化的子系统
+        self._loaded = False
+        self._load_error: str = ""
 
-        self.config = load_config()
-        # 应用配置中的日志级别
-        from log_setup import set_level
-        set_level(self.config.settings.log_level)
-        logger.info("应用启动，版本 %s，日志级别 %s", __version__, self.config.settings.log_level)
-
+        # ISSUE-PFM-02：先用空 AppConfig 创建 MainWindow，磁盘 IO 延迟到后台线程
+        # 这样首屏渲染不等待 load_config / UsageHistory 建表 / UsageProxy 端口绑定
+        self.config = AppConfig()
+        # 应用默认主题（实际主题在后台加载配置后由 _on_loaded 应用）
         theme = self.config.settings.theme
         ctk.set_appearance_mode(theme)
         AnimationHelper.set_ripple_color(self.config.settings.ripple_color)
 
-        self.scheduler = BalanceScheduler(self.config)
-        self._usage_history = UsageHistory()
-        # 代理目标从配置读取，用户可在设置中切换 provider（需重启生效）
-        # 鉴权 token 从配置读取（DPAPI 加密），首次启动自动生成
-        self._usage_proxy = UsageProxy(
-            target_host=self.config.settings.proxy_target,
-            proxy_token_enc=self.config.settings.proxy_token_enc,
-        )
-        # 启动后若生成了新 token，回写配置
-        if self._usage_proxy.token_enc_changed:
-            self.config.settings.proxy_token_enc = self._usage_proxy.proxy_token_enc
-            save_config(self.config)
-        self._usage_proxy.start()
+        # 后台线程加载完成后填充的子系统（首屏时为 None）
+        self.scheduler: BalanceScheduler | None = None
+        self._usage_history: UsageHistory | None = None
+        self._usage_proxy: UsageProxy | None = None
+        self._proxy_url: str = ""
+        self.main_window: MainWindow | None = None
+        self.floating_window: FloatingWindow | None = None
+        self._tray_icon = None
+        self._tray_thread: threading.Thread | None = None
+
+        # 全局热键不涉及磁盘 IO，可在 __init__ 中注册
         if sys.platform == "win32":
             try:
                 keyboard.add_hotkey("ctrl+shift+b", self._toggle_window)
             except Exception as e:
                 log_exception("App.__init__.keyboard", e)
-        self._proxy_url = self._usage_proxy.proxy_url
-        self.main_window: MainWindow | None = None
-        self.floating_window: FloatingWindow | None = None
-        self._tray_icon = None
-        self._tray_thread: threading.Thread | None = None
 
     def _start_ipc_listener(self):
         def listen():
@@ -195,35 +189,130 @@ class App:
             on_apply_theme=self._apply_theme,
         )
         self.main_window.title(f"DeepSeek 余额监控 v{__version__}")
-        self.main_window.set_refresh_callback(self.scheduler.refresh_all_now)
-        self.main_window.set_settings_callback(self.scheduler.set_settings)
+        self.main_window.set_refresh_callback(self._on_manual_refresh_during_load)
+        self.main_window.set_settings_callback(self._on_settings_during_load)
         self.main_window.set_autostart_callback(_set_autostart)
         self.main_window.set_save_callback(lambda: save_config(self.config))
         self.main_window.set_view_curve_callback(self._on_view_curve)
         self.main_window.set_view_usage_callback(self._on_view_usage)
-        # ISSUE-SEC-04：注入 token 提供者，供设置面板展示 token hash
-        self.main_window.set_proxy_token_provider(self._usage_proxy.get_proxy_token)
+        # ISSUE-PFM-02：首屏空状态显示"加载中..."友好提示
+        self.main_window.set_status("正在加载配置...")
 
         if self.config.settings.autostart:
             _set_autostart(True)
 
+        # ISSUE-PFM-02：100ms 后启动后台加载线程，让首屏先完成渲染
         self.main_window.after(100, self._deferred_init)
         self.main_window.after(500, self.main_window.start_focus_monitor)
         self.main_window.mainloop()
 
+    def _on_manual_refresh_during_load(self):
+        """ISSUE-PFM-02：加载完成前的刷新请求转发（加载完成后由 scheduler 处理）。"""
+        if self.scheduler is not None:
+            self.scheduler.refresh_all_now()
+        else:
+            logger.info("配置尚未加载完成，刷新请求已忽略")
+
+    def _on_settings_during_load(self, interval: int):
+        """ISSUE-PFM-02：加载完成前的设置变更（仅记录，加载后由 scheduler 应用）。"""
+        if self.scheduler is not None:
+            self.scheduler.set_settings(interval)
+        else:
+            self.config.settings.interval_sec = max(10, interval)
+            logger.info("配置尚未加载完成，间隔设置已暂存")
+
     def _deferred_init(self):
-        threading.Thread(target=self._background_init, daemon=True).start()
+        """启动后台加载线程 + 托盘图标。"""
+        # ISSUE-PFM-02：后台线程执行磁盘 IO（load_config / 建表 / 端口绑定）
+        threading.Thread(target=self._background_init, daemon=True, name="AppInit").start()
         self._start_tray()
-        if self.main_window and self.main_window.winfo_exists():
-            proxy_info = f"代理: {self._proxy_url}"
-            self.main_window.set_status(proxy_info)
 
     def _background_init(self):
-        self._start_ipc_listener()
-        self.scheduler.on_result(self._on_balance_result)
-        self.scheduler.start()
+        """ISSUE-PFM-02：后台加载配置 + 建表 + 启动代理 + 启动调度器。
+
+        所有磁盘 IO 与端口绑定在此后台线程执行，不阻塞主线程 UI 渲染。
+        加载完成后通过 after(0, ...) 回到主线程更新 UI。
+        """
+        try:
+            # 1. 加载配置（磁盘读 + DPAPI 解密）
+            loaded_config = load_config()
+            self.config = loaded_config
+            # 应用配置中的日志级别
+            set_level(loaded_config.settings.log_level)
+            logger.info("应用启动，版本 %s，日志级别 %s", __version__, loaded_config.settings.log_level)
+
+            # 2. 创建 UsageHistory（SQLite 建表，磁盘 IO）
+            self._usage_history = UsageHistory()
+
+            # 3. 创建并启动 UsageProxy（端口绑定）
+            self._usage_proxy = UsageProxy(
+                target_host=loaded_config.settings.proxy_target,
+                proxy_token_enc=loaded_config.settings.proxy_token_enc,
+            )
+            # 启动后若生成了新 token，回写配置
+            if self._usage_proxy.token_enc_changed:
+                loaded_config.settings.proxy_token_enc = self._usage_proxy.proxy_token_enc
+                save_config(loaded_config)
+            self._usage_proxy.start()
+            self._proxy_url = self._usage_proxy.proxy_url
+
+            # 4. 创建调度器并注册回调
+            self.scheduler = BalanceScheduler(loaded_config)
+            self.scheduler.on_result(self._on_balance_result)
+
+            # 5. 启动 IPC 监听 + 调度器
+            self._start_ipc_listener()
+            self.scheduler.start()
+
+            # 6. 回到主线程更新 UI
+            if self.main_window and self.main_window.winfo_exists():
+                self.main_window.after(0, self._on_loaded)
+        except Exception as e:
+            logger.exception("后台加载失败：%s", e)
+            self._load_error = str(e)
+            if self.main_window and self.main_window.winfo_exists():
+                self.main_window.after(0, self._on_load_failed)
+
+    def _on_loaded(self):
+        """ISSUE-PFM-02：后台加载完成，主线程更新 UI。
+
+        - 更新 MainWindow 持有的 config 引用并重建账户列表
+        - 应用配置中的主题
+        - 设置代理 URL 状态
+        - 触发首次刷新
+        """
+        self._loaded = True
+        if not self.main_window or not self.main_window.winfo_exists():
+            return
+
+        # 更新 MainWindow 的 config 引用并重建账户列表
+        self.main_window._config = self.config
+        self.main_window._rebuild_account_list()
+        # 重新注入 scheduler 回调（加载完成后才能真正刷新）
+        self.main_window.set_refresh_callback(self.scheduler.refresh_all_now)
+        self.main_window.set_settings_callback(self.scheduler.set_settings)
+        # ISSUE-SEC-04：注入 token 提供者，供设置面板展示 token hash
+        self.main_window.set_proxy_token_provider(self._usage_proxy.get_proxy_token)
+
+        # 应用配置中的主题
+        theme = self.config.settings.theme
+        ctk.set_appearance_mode(theme)
+        AnimationHelper.set_ripple_color(self.config.settings.ripple_color)
+
+        # 更新状态栏显示代理 URL
+        proxy_info = f"代理: {self._proxy_url}" if self._proxy_url else "就绪"
+        self.main_window.set_status(proxy_info)
+
+        # 触发首次刷新
         if self.config.accounts:
             self.scheduler.refresh_all_now()
+
+    def _on_load_failed(self):
+        """ISSUE-PFM-02：后台加载失败，主线程显示错误状态（不崩溃）。"""
+        self._loaded = False
+        if self.main_window and self.main_window.winfo_exists():
+            self.main_window.set_status(f"加载失败: {self._load_error}")
+            logger.error("应用启动加载失败，UI 显示错误状态：%s", self._load_error)
 
     def _apply_theme(self, theme: str):
         ctk.set_appearance_mode(theme)
@@ -270,6 +359,10 @@ class App:
             self.main_window.set_status(f"上次更新: {_format_time(self._last_update_time)}")
 
     def _on_view_curve(self, account):
+        # ISSUE-PFM-02：加载未完成时 usage_history 可能为 None
+        if self._usage_history is None:
+            logger.warning("用量历史尚未加载完成，无法打开趋势图")
+            return
         if self.main_window and self.main_window.winfo_exists():
             from usage_curve_window import BalanceCurveWindow
             BalanceCurveWindow(
@@ -281,6 +374,10 @@ class App:
             )
 
     def _on_view_usage(self):
+        # ISSUE-PFM-02：加载未完成时 usage_history 可能为 None
+        if self._usage_history is None:
+            logger.warning("用量历史尚未加载完成，无法打开用量概览")
+            return
         if self.main_window and self.main_window.winfo_exists():
             from usage_bar_window import UsageBarWindow
             UsageBarWindow(
@@ -414,7 +511,9 @@ class App:
         self._exiting = True
         self._save_window_position()
         save_config(self.config)
-        self.scheduler.stop()
+        # ISSUE-PFM-02：加载未完成时退出，scheduler/proxy 可能为 None
+        if self.scheduler is not None:
+            self.scheduler.stop()
 
         if self._tray_icon:
             try:
@@ -431,14 +530,26 @@ class App:
         except Exception as e:
             log_exception("_quit.window_destroy", e)
 
-        self._usage_proxy.stop()
+        if self._usage_proxy is not None:
+            self._usage_proxy.stop()
+        # ISSUE-PFM-04：关闭所有 Provider 的 Session，释放连接池资源
+        try:
+            from balance_checker import close_all_provider_sessions
+            close_all_provider_sessions()
+        except Exception as e:
+            log_exception("_quit.close_provider_sessions", e)
         self._cleanup_lock()
         if sys.platform == "win32":
             try:
                 keyboard.unhook_all()
             except Exception as e:
                 log_exception("_quit.keyboard_unhook", e)
-        os._exit(0)
+        # ISSUE-LOG-03：默认改用 sys.exit 优雅退出，--force-exit 应急开关保留 os._exit
+        if "--force-exit" in sys.argv:
+            logger.warning("检测到 --force-exit 开关，使用 os._exit 强制退出")
+            os._exit(0)
+        else:
+            sys.exit(0)
 
 
 def main():

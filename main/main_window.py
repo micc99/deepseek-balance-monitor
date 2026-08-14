@@ -70,41 +70,66 @@ class MainWindow(ctk.CTk):
                 self._on_switch_to_floating()
 
     def start_focus_monitor(self):
+        """ISSUE-PFM-05：启动事件驱动的焦点监视（替代 500ms 轮询）。
+
+        绑定 FocusIn/FocusOut 事件，收到 FocusOut 后起 300ms 防抖计时器，
+        期间若收到 FocusIn 则取消（过滤快速焦点切换）。
+        计时器触发后校验是否存在子对话框（CTkToplevel），有则不切悬浮窗。
+        """
         self._cancel_focus_check()
-        self._focus_check_loop()
+        try:
+            self.bind_all("<FocusIn>", self._on_focus_in)
+            self.bind_all("<FocusOut>", self._on_focus_out)
+        except Exception as e:
+            log_exception("MainWindow.start_focus_monitor", e)
 
     def _cancel_focus_check(self):
+        """取消挂起的防抖计时器（原 _focus_check_id 复用为防抖计时器 ID）。"""
         if self._focus_check_id is not None:
-            self.after_cancel(self._focus_check_id)
+            try:
+                self.after_cancel(self._focus_check_id)
+            except Exception:
+                pass
             self._focus_check_id = None
 
-    def _focus_check_loop(self):
-        """轮询焦点状态：失焦且无子对话框时自动切悬浮窗。
+    def _on_focus_in(self, event):
+        """ISSUE-PFM-05：收到 FocusIn 取消挂起的防抖计时器（用户回到窗口）。"""
+        self._cancel_focus_check()
 
-        500ms 间隔检查，withdrawn 状态下 1000ms 跳过（省 CPU）。
-        有 CTkToplevel 子窗口时暂停检测，避免对话框抢焦点导致误切。
+    def _on_focus_out(self, event):
+        """ISSUE-PFM-05：收到 FocusOut 后起 300ms 防抖计时器。
+
+        300ms 用于过滤快速焦点切换（如点击子对话框时的瞬时 FocusOut）。
+        计时器触发后才真正判断是否切悬浮窗。
         """
+        # 仅当事件目标是本窗口或其子组件时才处理
+        if not self._is_self_or_descendant(event.widget) and event.widget is not self:
+            # 焦点离开本窗口体系才计时；否则忽略（如窗口内组件间切换）
+            pass
+        self._cancel_focus_check()
+        # ISSUE-PFM-05：300ms 防抖，过滤瞬时 FocusOut
+        self._focus_check_id = self.after(300, self._on_focus_loss_confirmed)
+
+    def _on_focus_loss_confirmed(self):
+        """ISSUE-PFM-05：300ms 防抖后确认焦点丢失，校验子对话框后切悬浮窗。
+
+        - 窗口已销毁则直接返回
+        - 窗口已最小化（withdrawn）则不重复切
+        - 存在 CTkToplevel 子对话框时暂停切换（避免对话框抢焦点导致误切）
+        """
+        self._focus_check_id = None
         if not self.winfo_exists():
             return
         if self.state() == "withdrawn":
-            self._focus_check_id = self.after(1000, self._focus_check_loop)
             return
+        # 校验子对话框：有则不切（避免对话框抢焦点误判）
         for w in self.winfo_children():
             if isinstance(w, ctk.CTkToplevel):
-                self._focus_check_id = self.after(500, self._focus_check_loop)
                 return
-        try:
-            focused = self.focus_get()
-        except (KeyError, Exception) as e:
-            log_exception("MainWindow._focus_check_loop", e)
-            focused = None
-        if focused is None or not self._is_self_or_descendant(focused):
-            self._cancel_focus_check()
-            self.withdraw()
-            if self._on_switch_to_floating:
-                self._on_switch_to_floating()
-        else:
-            self._focus_check_id = self.after(500, self._focus_check_loop)
+        # 确认焦点丢失，切悬浮窗
+        self.withdraw()
+        if self._on_switch_to_floating:
+            self._on_switch_to_floating()
 
     def _is_self_or_descendant(self, widget) -> bool:
         w = widget

@@ -5,22 +5,45 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import customtkinter as ctk
-import matplotlib
-matplotlib.use("TkAgg")
-
-import matplotlib.font_manager as _fm
-_CHINESE_FONTS = ['Microsoft YaHei', 'SimHei', 'DengXian', 'Noto Sans CJK SC']
-_FONT_NAMES = {f.name for f in _fm.fontManager.ttflist}
-_CHOSEN_FONT = next((f for f in _CHINESE_FONTS if f in _FONT_NAMES), None)
-if _CHOSEN_FONT:
-    matplotlib.rcParams['font.sans-serif'] = [_CHOSEN_FONT] + matplotlib.rcParams.get('font.sans-serif', [])
-    matplotlib.rcParams['axes.unicode_minus'] = False
-    matplotlib.rcParams['font.size'] = 10
-
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
 
 from usage_history import UsageHistory
+
+# ISSUE-PFM-01：matplotlib 延迟加载缓存。
+# 启动时不 import matplotlib（首次 import 可达 200-500ms），
+# 首次绘图时通过 _ensure_matplotlib() 执行 import + 字体配置，后续直接返回缓存。
+_mpl_cache: dict = {}
+
+
+def _ensure_matplotlib() -> dict:
+    """延迟加载 matplotlib 模块并配置中文字体。
+
+    首次调用时执行 import matplotlib + 字体配置（matplotlib.use("TkAgg")、
+    rcParams 字体设置），后续调用直接返回缓存，避免重复初始化开销。
+
+    Returns:
+        dict: 包含 matplotlib 绘图所需对象的字典，键为：
+            - 'matplotlib': matplotlib 模块本身
+            - 'FigureCanvasTkAgg': TkAgg 后端的 Canvas 适配器
+            - 'Figure': matplotlib Figure 类
+    """
+    if _mpl_cache:
+        return _mpl_cache
+    import matplotlib
+    matplotlib.use("TkAgg")
+    import matplotlib.font_manager as _fm
+    _CHINESE_FONTS = ['Microsoft YaHei', 'SimHei', 'DengXian', 'Noto Sans CJK SC']
+    _FONT_NAMES = {f.name for f in _fm.fontManager.ttflist}
+    _CHOSEN_FONT = next((f for f in _CHINESE_FONTS if f in _FONT_NAMES), None)
+    if _CHOSEN_FONT:
+        matplotlib.rcParams['font.sans-serif'] = [_CHOSEN_FONT] + matplotlib.rcParams.get('font.sans-serif', [])
+        matplotlib.rcParams['axes.unicode_minus'] = False
+        matplotlib.rcParams['font.size'] = 10
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    from matplotlib.figure import Figure
+    _mpl_cache['matplotlib'] = matplotlib
+    _mpl_cache['FigureCanvasTkAgg'] = FigureCanvasTkAgg
+    _mpl_cache['Figure'] = Figure
+    return _mpl_cache
 
 BAR_COLORS = {
     "dark": {"today": "#ce93d8", "week": "#90caf9", "month": "#a5d6a7"},
@@ -71,15 +94,40 @@ class UsageBarWindow(ctk.CTkToplevel):
         self._history = history
         self._accounts = accounts
 
-        self._canvas: Optional[FigureCanvasTkAgg] = None
-        self._fig: Optional[Figure] = None
+        # matplotlib 延迟加载：先不持有 Figure/Canvas 引用，首次绘图时才创建
+        self._canvas = None
+        self._fig = None
+        self._loading_label: Optional[ctk.CTkLabel] = None
 
         self._setup_ui()
-        self._render()
+        # ISSUE-PFM-01：首次打开窗口时显示 loading 提示，避免空白等待
+        self._show_loading()
+        # 延迟一帧后实际绘图，让 loading 提示先渲染可见
+        self.after(50, self._render)
 
         self.grab_set()
         self.lift()
         self.focus()
+
+    def _show_loading(self):
+        """ISSUE-PFM-01：显示加载提示，告知用户图表正在初始化。"""
+        self._loading_label = ctk.CTkLabel(
+            self,
+            text="加载图表中...",
+            font=ctk.CTkFont(size=14),
+            text_color="gray",
+        )
+        self._loading_label.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self._loading_label.update_idletasks()
+
+    def _hide_loading(self):
+        """ISSUE-PFM-01：绘图完成后销毁 loading 提示。"""
+        if self._loading_label is not None:
+            try:
+                self._loading_label.destroy()
+            except Exception:
+                pass
+            self._loading_label = None
 
     def destroy(self):
         """关闭窗口时释放 matplotlib Figure，避免内存泄漏。
@@ -111,6 +159,11 @@ class UsageBarWindow(ctk.CTkToplevel):
         ).grid(row=0, column=0, padx=(0, 15))
 
     def _render(self):
+        # ISSUE-PFM-01：延迟加载 matplotlib，首次调用时执行 import + 字体配置
+        mpl = _ensure_matplotlib()
+        Figure = mpl['Figure']
+        FigureCanvasTkAgg = mpl['FigureCanvasTkAgg']
+
         if self._canvas:
             self._canvas.get_tk_widget().destroy()
             self._canvas = None
@@ -146,6 +199,8 @@ class UsageBarWindow(ctk.CTkToplevel):
             canvas_widget.update_idletasks()
             fig.tight_layout()
             self._canvas.draw()
+            # ISSUE-PFM-01：绘图完成后销毁 loading 提示
+            self._hide_loading()
             return
 
         all_uids = list(uid_map.keys())
@@ -200,3 +255,5 @@ class UsageBarWindow(ctk.CTkToplevel):
         canvas_widget.update_idletasks()
         fig.tight_layout()
         self._canvas.draw()
+        # ISSUE-PFM-01：绘图完成后销毁 loading 提示
+        self._hide_loading()

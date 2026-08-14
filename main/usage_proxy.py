@@ -6,7 +6,7 @@ import json
 import logging
 import secrets
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 
 from usage_logger import log_usage
@@ -38,6 +38,50 @@ def _hash_token(token: str) -> str:
 def _hash_api_key(api_key: str) -> str:
     """对 API Key 取 SHA-256 前 16 位 hex，用于审计日志。"""
     return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+
+
+class SSEUsageParser:
+    """ISSUE-PFM-06：SSE 流式行级解析器。
+
+    维护 line_buffer，逐 chunk 喂入并按 \\n 分割完整行，
+    检查 `data: ` 前缀与 `usage` 关键字，记录最后一个 usage dict。
+
+    特性：
+    - 内存占用恒定：line_buffer 只保留最后不完整的一行
+    - 正确拼接跨 chunk 的 SSE 行（chunk 边界切分场景）
+    - 处理 \\r\\n 与 \\n 两种换行符
+    - 覆盖式记录最后一个 usage（与原方案"取最后一个"语义一致）
+    """
+
+    def __init__(self):
+        self._line_buffer: str = ""
+        self._last_usage_data: dict | None = None
+
+    def feed(self, chunk: str) -> None:
+        """喂入一个文本 chunk，解析其中的完整 SSE 行。
+
+        Args:
+            chunk: 解码后的 SSE 文本片段（可能包含不完整行）
+        """
+        self._line_buffer += chunk
+        # 按换行符分割，处理完整行
+        while "\n" in self._line_buffer:
+            line, self._line_buffer = self._line_buffer.split("\n", 1)
+            # 处理 \r\n 与 \n 两种换行符
+            line = line.rstrip("\r")
+            if line.startswith("data: ") and "usage" in line and "[DONE]" not in line:
+                try:
+                    d = json.loads(line[6:])
+                    if isinstance(d.get("usage"), dict):
+                        # 覆盖式记录最后一个 usage
+                        self._last_usage_data = d["usage"]
+                except Exception as e:
+                    log_exception("usage_proxy.streaming_usage_line", e)
+
+    @property
+    def last_usage(self) -> dict | None:
+        """返回最后一个含 usage 的 data 行解析结果（流结束时调用）。"""
+        return self._last_usage_data
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -119,7 +163,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_header("Connection", "close")
                 self.end_headers()
 
-                usage_text = ""
+                # ISSUE-PFM-06：使用 SSEUsageParser 行级状态机解析 SSE 流
+                # 避免累积完整 usage_text，内存占用恒定
+                parser = SSEUsageParser()
                 while True:
                     chunk = resp.read(4096)
                     if not chunk:
@@ -127,18 +173,11 @@ class _Handler(BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
                     self.wfile.flush()
                     if api_key:
-                        usage_text += chunk.decode("utf-8", errors="replace")
+                        parser.feed(chunk.decode("utf-8", errors="replace"))
 
-                if api_key and usage_text:
-                    for line in reversed(usage_text.split("\n")):
-                        if line.startswith("data: ") and "usage" in line and "[DONE]" not in line:
-                            try:
-                                d = json.loads(line[6:])
-                                if isinstance(d.get("usage"), dict):
-                                    log_usage(api_key, d["usage"])
-                            except Exception as e:
-                                log_exception("usage_proxy.streaming_usage", e)
-                            break
+                # 流结束，log 最后一个 usage（若存在）
+                if api_key and parser.last_usage is not None:
+                    log_usage(api_key, parser.last_usage)
             else:
                 resp_body = resp.read()
                 for k, v in resp.getheaders():
@@ -261,7 +300,8 @@ class UsageProxy:
         self._host = host
         self._port = port
         self._target_host = target_host
-        self._server: HTTPServer | None = None
+        # ISSUE-NET-02：ThreadingHTTPServer 支持并发请求
+        self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
         # 鉴权 token 管理
@@ -353,7 +393,10 @@ class UsageProxy:
         class _HandlerWithRef(_Handler):
             proxy_ref = self
 
-        self._server = HTTPServer((self._host, self._port), _HandlerWithRef)
+        # ISSUE-NET-02：使用 ThreadingHTTPServer 替代 HTTPServer，支持并发请求不排队
+        # daemon_threads=True 确保主进程退出时子线程自动结束，不残留
+        self._server = ThreadingHTTPServer((self._host, self._port), _HandlerWithRef)
+        self._server.daemon_threads = True
         self._thread = threading.Thread(
             target=self._server.serve_forever,
             daemon=True,
