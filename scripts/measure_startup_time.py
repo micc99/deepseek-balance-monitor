@@ -7,17 +7,39 @@
 
 输出：
     - import 耗时前 20 名模块
-    - 冷启动总耗时（毫秒）
-    - 热启动耗时（二次启动，模块已缓存）
+    - 冷启动总耗时
+    - matplotlib 是否在启动时被 import（验证 ISSUE-PFM-01）
+
+日志写入：main/log/startup_time.log（同时输出到控制台）
 
 指标目标（NFR-PERF-01）：
     - 冷启动 < 300ms（10 账户场景）
 """
+import logging
 import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
+
+
+# 日志配置：同时写入文件和控制台
+LOG_DIR = Path(__file__).parent.parent / "main" / "log"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_FILE = LOG_DIR / "startup_time.log"
+
+logger = logging.getLogger("measure_startup_time")
+logger.setLevel(logging.INFO)
+_formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+_file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+_file_handler.setFormatter(_formatter)
+_file_handler.setLevel(logging.INFO)
+logger.addHandler(_file_handler)
+_console_handler = logging.StreamHandler(sys.stdout)
+_console_handler.setFormatter(_formatter)
+_console_handler.setLevel(logging.INFO)
+logger.addHandler(_console_handler)
 
 
 def measure_import_time():
@@ -82,29 +104,34 @@ def measure_cold_startup():
 
 def main():
     """主入口：测量并打印启动性能指标。"""
-    print("=" * 60)
-    print("ISSUE-PFM-07 启动时间测量")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("ISSUE-PFM-07 启动时间测量（%s）", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    logger.info("=" * 60)
 
-    print("\n[1] 冷启动耗时测量...")
+    logger.info("[1] 冷启动耗时测量...")
     cold_ms = measure_cold_startup()
-    print(f"    冷启动耗时: {cold_ms:.0f} ms")
-    print(f"    目标 (< 300ms): {'✓ 达标' if cold_ms < 300 else '✗ 未达标'}")
+    logger.info("    冷启动耗时: %.0f ms", cold_ms)
+    logger.info("    目标 (< 300ms): %s", "✓ 达标" if cold_ms < 300 else "✗ 未达标")
 
-    print("\n[2] import 耗时分析（前 20 名）...")
+    logger.info("[2] import 耗时分析（前 20 名）...")
     try:
         imports = measure_import_time()
         for module, us in imports:
-            print(f"    {us:>8} us  {module}")
+            logger.info("    %8d us  %s", us, module)
         # 检查 matplotlib 是否在启动时被 import
         mpl_imported = any("matplotlib" in m for m, _ in imports)
-        print(f"\n    matplotlib 是否在启动时被 import: {'是（ISSUE-PFM-01 未生效）' if mpl_imported else '否（ISSUE-PFM-01 已生效）'}")
+        logger.info(
+            "    matplotlib 是否在启动时被 import: %s",
+            "是（ISSUE-PFM-01 未生效）" if mpl_imported else "否（ISSUE-PFM-01 已生效）",
+        )
     except Exception as e:
-        print(f"    import 分析失败: {e}")
+        logger.error("    import 分析失败: %s", e)
 
-    print("\n[3] 性能指标汇总")
-    print(f"    - 冷启动: {cold_ms:.0f} ms (目标 < 300ms)")
-    print("\n注意：热启动、闲置内存、闲置 CPU、刷新延迟请配合 sample_resource_usage.py 使用")
+    logger.info("[3] 性能指标汇总")
+    logger.info("    - 冷启动: %.0f ms (目标 < 300ms)", cold_ms)
+    logger.info("    日志已写入: %s", LOG_FILE)
+    logger.info("注意：热启动、闲置内存、闲置 CPU、刷新延迟请配合 sample_resource_usage.py 使用")
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":
