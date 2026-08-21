@@ -1,11 +1,18 @@
 # DeepSeek 余额监控 · 产品需求文档（PRD）
 
-> **文档版本**：v1.4
-> **文档日期**：2026-08-07
+> **文档版本**：v1.6
+> **文档日期**：2026-08-21
 > **适用产品**：deepseek-balance-monitor（当前发布版本 v1.9.3）
 > **文档目的**：作为产品规划与 AI 协作交接的权威需求基线，指导 v1.10 ~ v2.x 版本的研发推进
 > **配套文档**：[deepseek-balance-monitor_改进方案_v1.3_2026-08-07.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/deepseek-balance-monitor_改进方案_v1.3_2026-08-07.md)（以下简称"改进方案"）
+> **关联独立项目**：[dsh-balance-plugin_PRD_v1.0_2026-08-14.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/dsh-balance-plugin_PRD_v1.0_2026-08-14.md)（DeepSeek Harness 余额插件线，独立文档体系维护，与桌面应用无依赖）
 > **语言**：简体中文（技术术语保留英文原文）
+> **v1.6 变更说明**：
+> - **DSH 插件线拆分至独立文档体系**（用户决策）：v1.5 草案中新增的 5.13 DSH 插件模块（FR-DSH-01~04）与 M6 里程碑（v1.13.0）整体迁移至 [dsh-balance-plugin_PRD_v1.0_2026-08-14.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/dsh-balance-plugin_PRD_v1.0_2026-08-14.md) 独立维护
+> - 拆分原因：DSH 插件为独立 TypeScript（Cordis）项目，与桌面应用无代码依赖、无交付依赖，独立文档体系便于并行推进与维护
+> - 连锁调整：移除 FR-DSH-xx ID 前缀、1.1 产品定位插件描述、8.7 M6 验收标准、DSH 风险与外部依赖、追溯矩阵 DSH 行
+> - 独立需求恢复为 42 项，标题项恢复为 44 个（与 v1.4 一致）
+> - v1.3 的需求删除变更保留
 > **v1.3 变更说明**：
 > - 基于用户决策删除以下需求（用户无对应需求）：
 >   - FR-SEC-02 旧版明文配置自动迁移（用户不需要自动迁移）

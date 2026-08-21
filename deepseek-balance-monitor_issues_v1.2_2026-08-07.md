@@ -1,12 +1,19 @@
 # DeepSeek 余额监控 · 可执行 Issue 清单
 
-> **文档版本**：v1.2
-> **文档日期**：2026-08-07
+> **文档版本**：v1.4
+> **文档日期**：2026-08-21
 > **源 PRD**：[deepseek-balance-monitor_PRD_v1.4_2026-08-07.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/deepseek-balance-monitor_PRD_v1.4_2026-08-07.md)
 > **配套改进方案**：[deepseek-balance-monitor_改进方案_v1.3_2026-08-07.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/deepseek-balance-monitor_改进方案_v1.3_2026-08-07.md)
+> **关联独立项目**：[dsh-balance-plugin_issues_v1.0_2026-08-14.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/dsh-balance-plugin_issues_v1.0_2026-08-14.md)（DSH 插件线 Issue 清单，独立文档体系维护，与桌面应用无依赖）
 > **文档目的**：将 PRD 中的需求拆分为可直接领取执行的工作项（Issue），每个 Issue 含任务清单、验收标准、依赖关系与执行要点
 > **语言**：简体中文（技术术语保留英文原文）
 > **命名规范**：`ISSUE-<模块缩写>-<序号>`，与 PRD 需求 ID 一一对应
+> **v1.4 变更说明**：
+> - **DSH 插件线拆分至独立文档体系**（用户决策）：v1.3 草案中新增的第 6 章 M6 里程碑（ISSUE-DSH-01~04）整体迁移至 [dsh-balance-plugin_issues_v1.0_2026-08-14.md](file:///d:/#MCP-Serve/deepseek-balance-monitor/dsh-balance-plugin_issues_v1.0_2026-08-14.md) 独立维护
+> - 拆分原因：DSH 插件为独立 TypeScript（Cordis）项目，与桌面应用无代码依赖、无交付依赖，独立 Issue 清单便于并行推进与维护
+> - 连锁调整：移除 M6 里程碑统计行、里程碑总览 M6 行、依赖关系图 DSH 链、执行建议第 6 条 M6 执行线及并行例外条款，恢复"非功能需求与风险跟踪 / 依赖关系图 / 执行建议"章节编号
+> - Issue 总数恢复为 49 项（与 v1.2 一致）
+> - v1.2 的 ISSUE-SEC-05 移除变更保留
 > **v1.1 变更说明**：
 > - 基于用户决策删除以下 Issue（用户无对应需求）：
 >   - ISSUE-ARC-03 配置 schema + 版本 + 迁移（用户不引入 pydantic 迁移机制，配置保留 dataclass）
