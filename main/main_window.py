@@ -18,9 +18,13 @@ from PySide6.QtWidgets import (
 )
 
 from config import AppConfig
+from edit_account_dialog import EditAccountDialog
+from settings_dialog import SettingsDialog
 from event_bus import (
     EventBus,
     EVENT_REFRESH_REQUESTED,
+    EVENT_SETTINGS_CHANGED,
+    EVENT_ACCOUNT_ADDED,
     EVENT_ACCOUNT_DELETED,
     EVENT_ACCOUNT_UPDATED,
 )
@@ -120,9 +124,10 @@ class MainWindow(QMainWindow):
         self.settings_btn = QPushButton("设置", objectName="flat")
         for btn in (self.add_btn, self.refresh_btn, self.float_btn, self.settings_btn):
             row.addWidget(btn)
-        # ISSUE-MIG-02：仅刷新/最小化接线；添加/设置随 ISSUE-MIG-03/05 实装
         self.refresh_btn.clicked.connect(self._on_manual_refresh)
         self.float_btn.clicked.connect(self._on_minimize_to_floating)
+        self.add_btn.clicked.connect(self._on_add_account)
+        self.settings_btn.clicked.connect(self._on_settings)
         return header
 
     def _build_list_area(self) -> QWidget:
@@ -160,6 +165,7 @@ class MainWindow(QMainWindow):
         row.addStretch(1)
         row.addWidget(self.interval_label)
         row.addWidget(usage_btn)
+        self.interval_label.mouseDoubleClickEvent = lambda _e: self._on_settings()
         self._update_interval_label()
         return footer
 
@@ -206,12 +212,44 @@ class MainWindow(QMainWindow):
         )
 
     def _on_add_account(self):
-        # ISSUE-MIG-05：EditAccountDialog Qt 化后接线
-        pass
+        default_label = f"Account {len(self._config.accounts) + 1}"
+        result, dup_uid = EditAccountDialog.show(
+            self, "添加监控账号", default_label=default_label,
+            existing_accounts=self._config.accounts
+        )
+        if dup_uid:
+            self._highlight_account(dup_uid)
+            return
+        if result:
+            self._config.accounts.append(result)
+            self._rebuild_account_list()
+            self._event_bus.publish(
+                EVENT_ACCOUNT_ADDED,
+                payload={"uid": result.uid, "label": result.label},
+                source="main_window",
+            )
 
     def _on_edit_account(self, uid: str):
-        # ISSUE-MIG-05：EditAccountDialog Qt 化后接线
-        pass
+        idx = next((i for i, a in enumerate(self._config.accounts) if a.uid == uid), None)
+        if idx is None:
+            return
+        acc = self._config.accounts[idx]
+        result, dup_uid = EditAccountDialog.show(
+            self, "编辑账号", acc, default_label=acc.label,
+            existing_accounts=self._config.accounts, exclude_uid=uid
+        )
+        if dup_uid:
+            self._highlight_account(dup_uid)
+            return
+        if result:
+            result.uid = uid
+            self._config.accounts[idx] = result
+            self._rebuild_account_list()
+            self._event_bus.publish(
+                EVENT_ACCOUNT_UPDATED,
+                payload={"uid": uid, "label": result.label},
+                source="main_window",
+            )
 
     def _on_delete_account(self, uid: str):
         idx = next((i for i, a in enumerate(self._config.accounts) if a.uid == uid), None)
@@ -254,8 +292,50 @@ class MainWindow(QMainWindow):
             self.interval_label.setText(f"刷新间隔: {sec}秒")
 
     def _on_settings(self):
-        # ISSUE-MIG-05：SettingsDialog Qt 化后接线
-        pass
+        # ISSUE-SEC-04：传入已脱敏的代理 token hash，便于用户排查客户端配置
+        proxy_token_display = ""
+        provider = getattr(self, "_proxy_token_provider", None)
+        if provider is not None:
+            try:
+                from usage_proxy import _hash_token
+                proxy_token_display = _hash_token(provider())
+            except Exception:
+                proxy_token_display = ""
+
+        result = SettingsDialog.show(
+            self,
+            self._config.settings.interval_sec,
+            self._config.settings.autostart,
+            self._config.settings.theme_mode,
+            self._config.settings.ripple_color,
+            self._config.settings.proxy_target,
+            proxy_token_display=proxy_token_display,
+        )
+        if result is not None:
+            interval, autostart, mode, ripple_color, proxy_target = result
+            self._config.settings.interval_sec = interval
+            self._config.settings.autostart = autostart
+            # ISSUE-THM-02：对话框返回的是亮暗模式（dark/light），写入 theme_mode；
+            # 主题身份 settings.theme 由 ThemeManager/Phase D 编辑器管理
+            self._config.settings.theme_mode = mode
+            self._config.settings.ripple_color = ripple_color
+            self._config.settings.proxy_target = proxy_target
+            self._update_interval_label()
+            if self._on_apply_theme:
+                self._on_apply_theme(mode)
+            # ISSUE-ARC-02：设置变更整体经 settings_changed 事件广播，
+            # App 订阅后统一分派（调度器间隔/自启/落盘）
+            self._event_bus.publish(
+                EVENT_SETTINGS_CHANGED,
+                payload={
+                    "interval": interval,
+                    "autostart": autostart,
+                    "theme_mode": mode,
+                    "ripple_color": ripple_color,
+                    "proxy_target": proxy_target,
+                },
+                source="main_window",
+            )
 
     # ---- WindowManager 兼容面（双栈同名 API）----
 

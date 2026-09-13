@@ -1,27 +1,37 @@
 from __future__ import annotations
 
-import tkinter as tk
 from typing import Optional
 
-import customtkinter as ctk
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from config import AccountConfig
+from balance_checker import get_provider_list
 
 
-"""添加/编辑账号的模态对话框。
+"""添加/编辑账号的模态对话框（Qt 版，ISSUE-MIG-05）。
 
 支持重复 API Key 检测：若 key 已存在，返回 duplicate_uid 而非 result，
 调用方据此高亮已有行而非新增。
+接口与 ctk 版一致：EditAccountDialog.show(...) 返回 (result, duplicate_uid)。
 """
 
 
-class EditAccountDialog(ctk.CTkToplevel):
+class EditAccountDialog(QDialog):
     def __init__(self, parent, title: str, account: Optional[AccountConfig] = None, default_label: str = "",
                  existing_accounts: Optional[list[AccountConfig]] = None, exclude_uid: Optional[str] = None):
         super().__init__(parent)
-        self.title(title)
-        self.geometry("400x280")
-        self.resizable(False, False)
+        self.setWindowTitle(title)
+        self.setFixedWidth(400)
+        self.setModal(True)
         self.result: Optional[AccountConfig] = None
         self.duplicate_uid: Optional[str] = None
         self._account = account
@@ -29,56 +39,47 @@ class EditAccountDialog(ctk.CTkToplevel):
         self._existing_accounts = existing_accounts or []
         self._exclude_uid = exclude_uid
 
-        self._label_var = tk.StringVar(value=account.label if account else default_label)
-        self._key_var = tk.StringVar(value=account.api_key if account else "")
-        self._provider_var = tk.StringVar(value=account.provider if account else "deepseek")
+        # ISSUE-ARC-06：注册表快照（运行时注册的 Provider 立即出现在下拉中）
+        providers = get_provider_list()
+        self._provider_keys = [p[0] for p in providers]
+        self._provider_names = [f"{p[1]} ({p[2]})" for p in providers]
 
-        self._setup_ui()
-        self.grab_set()
-        self.lift()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 14, 16, 12)
+        root.setSpacing(6)
 
-    def _setup_ui(self):
-        from balance_checker import PROVIDERS
+        root.addWidget(QLabel("标签名称"))
+        self._label_edit = QLineEdit(account.label if account else default_label)
+        root.addWidget(self._label_edit)
 
-        ctk.CTkLabel(self, text="标签名称", font=ctk.CTkFont(size=13)).pack(pady=(20, 0))
-        ctk.CTkEntry(self, textvariable=self._label_var, width=300).pack(pady=(5, 10))
+        root.addWidget(QLabel("API Key"))
+        self._key_edit = QLineEdit(account.api_key if account else "")
+        self._key_edit.setPlaceholderText("sk-...")
+        root.addWidget(self._key_edit)
 
-        ctk.CTkLabel(self, text="API Key", font=ctk.CTkFont(size=13)).pack()
-        key_entry = ctk.CTkEntry(self, textvariable=self._key_var, width=300)
-        key_entry.pack(pady=(5, 10))
+        root.addWidget(QLabel("服务商"))
+        self._provider_combo = QComboBox()
+        self._provider_combo.addItems(self._provider_names)
+        default_provider = account.provider if account else "deepseek"
+        if default_provider in self._provider_keys:
+            self._provider_combo.setCurrentIndex(self._provider_keys.index(default_provider))
+        root.addWidget(self._provider_combo)
 
-        ctk.CTkLabel(self, text="服务商", font=ctk.CTkFont(size=13)).pack()
-        provider_names = [f"{p.label} ({p.description})" for p in PROVIDERS.values()]
-        provider_keys = list(PROVIDERS.keys())
-        self._provider_names = provider_names
-        self._provider_keys = provider_keys
-
-        def _on_provider_select(choice):
-            idx = provider_names.index(choice) if choice in provider_names else 0
-            self._provider_var.set(provider_keys[idx])
-
-        provider_menu = ctk.CTkOptionMenu(
-            self, values=provider_names, command=_on_provider_select
-        )
-        provider_menu.pack(pady=(5, 15))
-
-        default_key = self._account.provider if self._account else "deepseek"
-        if default_key in provider_keys:
-            idx = provider_keys.index(default_key)
-            provider_menu.set(provider_names[idx])
-
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack()
-        ctk.CTkButton(btn_frame, text="保存", width=100, command=self._on_save).pack(
-            side="left", padx=5
-        )
-        ctk.CTkButton(
-            btn_frame, text="取消", width=100, fg_color="gray", command=self.destroy
-        ).pack(side="left", padx=5)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        save_btn = QPushButton("保存")
+        cancel_btn = QPushButton("取消", objectName="flat")
+        save_btn.setFixedWidth(100)
+        cancel_btn.setFixedWidth(100)
+        save_btn.clicked.connect(self._on_save)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(cancel_btn)
+        root.addLayout(btn_row)
 
     def _on_save(self):
-        label = self._label_var.get().strip() or self._default_label
-        key = self._key_var.get().strip()
+        label = self._label_edit.text().strip() or self._default_label
+        key = self._key_edit.text().strip()
         if not key:
             return
         for acc in self._existing_accounts:
@@ -86,14 +87,15 @@ class EditAccountDialog(ctk.CTkToplevel):
                 continue
             if acc.api_key == key:
                 self.duplicate_uid = acc.uid
-                self.destroy()
+                self.reject()
                 return
-        self.result = AccountConfig(label=label, api_key=key, provider=self._provider_var.get())
-        self.destroy()
+        provider = self._provider_keys[self._provider_combo.currentIndex()]
+        self.result = AccountConfig(label=label, api_key=key, provider=provider)
+        self.accept()
 
     @classmethod
     def show(cls, parent, title: str, account: Optional[AccountConfig] = None, default_label: str = "",
              existing_accounts: Optional[list[AccountConfig]] = None, exclude_uid: Optional[str] = None):
         dlg = cls(parent, title, account, default_label, existing_accounts, exclude_uid)
-        dlg.wait_window()
+        dlg.exec()
         return dlg.result, dlg.duplicate_uid

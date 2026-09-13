@@ -1,17 +1,31 @@
 from __future__ import annotations
 
-import tkinter as tk
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+)
 
-import customtkinter as ctk
 
-
-"""设置对话框：刷新间隔、主题、波纹颜色、代理目标、开机自启。
+"""设置对话框（Qt 版，ISSUE-MIG-05）：刷新间隔、主题、波纹颜色、代理目标、开机自启。
 
 代理目标变更后需重启程序才能生效（代理端口在启动时绑定）。
+接口与 ctk 版一致：SettingsDialog.show(...) 返回
+(interval, autostart, theme_mode, ripple_color, proxy_target) 或 None。
+
+注：波纹动画已按 D6 决策移除，波纹颜色项仅维持配置兼容（无视觉效果）；
+Phase D THM-06 将把主题区扩展为莫奈预设 + 自定义种子色。
 """
 
 
-class SettingsDialog(ctk.CTkToplevel):
+class SettingsDialog(QDialog):
     RIPPLE_COLORS = {
         "淡蓝色": "#aaddff",
         "淡绿色": "#aaffaa",
@@ -22,7 +36,6 @@ class SettingsDialog(ctk.CTkToplevel):
     }
 
     # 代理可转发的 API 提供商列表，值为各 provider 的域名
-    # 用户选择后需重启程序使代理生效
     PROXY_TARGETS = {
         "DeepSeek": "api.deepseek.com",
         "SiliconFlow": "api.siliconflow.cn",
@@ -42,111 +55,92 @@ class SettingsDialog(ctk.CTkToplevel):
         proxy_token_display: str = "",
     ):
         super().__init__(parent)
-        self.title("设置")
-        self.geometry("440x520")
-        self.resizable(False, False)
+        self.setWindowTitle("设置")
+        self.setFixedWidth(460)
+        self.setModal(True)
         self.result = None
-
-        self._interval_var = tk.StringVar(value=str(interval_sec))
-        self._autostart_var = tk.BooleanVar(value=autostart)
-        self._theme_var = tk.StringVar(value="暗黑模式" if theme == "dark" else "白色模式")
-        self._proxy_token_display = proxy_token_display  # 已脱敏的 token（hash）
 
         reverse_colors = {v: k for k, v in self.RIPPLE_COLORS.items()}
         current_ripple_name = reverse_colors.get(ripple_color, "淡蓝色")
-        self._ripple_var = tk.StringVar(value=current_ripple_name)
-
         reverse_targets = {v: k for k, v in self.PROXY_TARGETS.items()}
         current_target_name = reverse_targets.get(proxy_target, proxy_target)
-        self._proxy_var = tk.StringVar(value=current_target_name)
 
-        self._setup_ui()
-        self.grab_set()
-        self.lift()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 14, 16, 12)
+        root.setSpacing(6)
 
-    def _setup_ui(self):
-        # 滚动容器：内容增多后支持滚动
-        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        root.addWidget(QLabel("自动刷新间隔（秒）"))
+        hint = QLabel("最少 10 秒，推荐 60 秒", objectName="muted")
+        root.addWidget(hint)
+        entry_row = QHBoxLayout()
+        self._interval_edit = QLineEdit(str(interval_sec))
+        self._interval_edit.setFixedWidth(120)
+        self._interval_edit.setAlignment(Qt.AlignCenter)
+        entry_row.addWidget(self._interval_edit)
+        entry_row.addWidget(QLabel("秒"))
+        entry_row.addStretch(1)
+        root.addLayout(entry_row)
 
-        ctk.CTkLabel(scroll, text="自动刷新间隔（秒）", font=ctk.CTkFont(size=14)).pack(pady=(10, 5), anchor="w")
-        ctk.CTkLabel(scroll, text="最少 10 秒，推荐 60 秒", font=ctk.CTkFont(size=11), text_color="gray").pack(anchor="w")
+        root.addWidget(QLabel("主题"))
+        self._theme_combo = QComboBox()
+        self._theme_combo.addItems(["暗黑模式", "白色模式"])
+        self._theme_combo.setCurrentText("暗黑模式" if theme == "dark" else "白色模式")
+        self._theme_combo.setFixedWidth(150)
+        root.addWidget(self._theme_combo)
 
-        entry_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        entry_frame.pack(pady=(5, 10), anchor="w")
-        ctk.CTkEntry(entry_frame, textvariable=self._interval_var, width=120, justify="center").pack(side="left", padx=5)
-        ctk.CTkLabel(entry_frame, text="秒", font=ctk.CTkFont(size=13)).pack(side="left")
+        root.addWidget(QLabel("波纹颜色"))
+        self._ripple_combo = QComboBox()
+        self._ripple_combo.addItems(list(self.RIPPLE_COLORS.keys()))
+        self._ripple_combo.setCurrentText(current_ripple_name)
+        self._ripple_combo.setFixedWidth(150)
+        root.addWidget(self._ripple_combo)
 
-        ctk.CTkLabel(scroll, text="主题", font=ctk.CTkFont(size=14)).pack(pady=(0, 5), anchor="w")
-        ctk.CTkOptionMenu(
-            scroll,
-            values=["暗黑模式", "白色模式"],
-            variable=self._theme_var,
-            width=150,
-        ).pack(pady=(0, 10), anchor="w")
+        root.addWidget(QLabel("代理目标 (用量记录)"))
+        root.addWidget(QLabel("选择后需重启程序生效", objectName="muted"))
+        self._proxy_combo = QComboBox()
+        self._proxy_combo.addItems(list(self.PROXY_TARGETS.keys()))
+        self._proxy_combo.setCurrentText(current_target_name)
+        self._proxy_combo.setFixedWidth(150)
+        root.addWidget(self._proxy_combo)
 
-        ctk.CTkLabel(scroll, text="波纹颜色", font=ctk.CTkFont(size=14)).pack(pady=(0, 5), anchor="w")
-        ctk.CTkOptionMenu(
-            scroll,
-            values=list(self.RIPPLE_COLORS.keys()),
-            variable=self._ripple_var,
-            width=150,
-        ).pack(pady=(0, 10), anchor="w")
-
-        ctk.CTkLabel(scroll, text="代理目标 (用量记录)", font=ctk.CTkFont(size=14)).pack(pady=(0, 5), anchor="w")
-        ctk.CTkLabel(scroll, text="选择后需重启程序生效", font=ctk.CTkFont(size=11), text_color="gray").pack(anchor="w")
-        ctk.CTkOptionMenu(
-            scroll,
-            values=list(self.PROXY_TARGETS.keys()),
-            variable=self._proxy_var,
-            width=150,
-        ).pack(pady=(5, 10), anchor="w")
-
-        autostart_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        autostart_frame.pack(pady=(0, 15), anchor="w")
-        ctk.CTkCheckBox(autostart_frame, text="开机自动启动", variable=self._autostart_var).pack()
+        self._autostart_check = QCheckBox("开机自动启动")
+        root.addWidget(self._autostart_check)
+        self._autostart_check.setChecked(autostart)
 
         # 代理 token 展示（只读，便于用户排查客户端配置）
-        if self._proxy_token_display:
-            ctk.CTkLabel(
-                scroll,
-                text="代理鉴权 Token（已脱敏）",
-                font=ctk.CTkFont(size=14),
-            ).pack(pady=(10, 5), anchor="w")
-            ctk.CTkLabel(
-                scroll,
-                text=self._proxy_token_display,
-                font=ctk.CTkFont(size=11),
-                text_color="gray",
-            ).pack(anchor="w")
-            ctk.CTkLabel(
-                scroll,
-                text="客户端需在请求头携带 X-Proxy-Token 才能使用代理",
-                font=ctk.CTkFont(size=11),
-                text_color="gray",
-            ).pack(anchor="w")
+        if proxy_token_display:
+            root.addWidget(QLabel("代理鉴权 Token（已脱敏）"))
+            root.addWidget(QLabel(proxy_token_display, objectName="muted"))
+            root.addWidget(QLabel("客户端需在请求头携带 X-Proxy-Token 才能使用代理", objectName="muted"))
 
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(pady=10)
-        ctk.CTkButton(btn_frame, text="保存", width=100, command=self._on_save).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="取消", width=100, fg_color="gray", command=self.destroy).pack(side="left", padx=5)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        save_btn = QPushButton("保存")
+        cancel_btn = QPushButton("取消", objectName="flat")
+        save_btn.setFixedWidth(100)
+        cancel_btn.setFixedWidth(100)
+        save_btn.clicked.connect(self._on_save)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(cancel_btn)
+        root.addLayout(btn_row)
 
     def _on_save(self):
         try:
-            val = int(self._interval_var.get().strip())
-            theme = "dark" if self._theme_var.get() == "暗黑模式" else "light"
-            ripple_color = self.RIPPLE_COLORS.get(self._ripple_var.get(), "#aaddff")
-            proxy_target = self.PROXY_TARGETS.get(self._proxy_var.get(), self._proxy_var.get())
-            self.result = (
-                max(10, val),
-                self._autostart_var.get(),
-                theme,
-                ripple_color,
-                proxy_target,
-            )
-            self.destroy()
+            val = int(self._interval_edit.text().strip())
         except ValueError:
-            pass
+            return
+        theme = "dark" if self._theme_combo.currentText() == "暗黑模式" else "light"
+        ripple_color = self.RIPPLE_COLORS.get(self._ripple_combo.currentText(), "#aaddff")
+        proxy_target = self.PROXY_TARGETS.get(self._proxy_combo.currentText(), self._proxy_combo.currentText())
+        self.result = (
+            max(10, val),
+            self._autostart_check.isChecked(),
+            theme,
+            ripple_color,
+            proxy_target,
+        )
+        self.accept()
 
     @classmethod
     def show(
@@ -168,5 +162,5 @@ class SettingsDialog(ctk.CTkToplevel):
             proxy_target,
             proxy_token_display,
         )
-        dlg.wait_window()
+        dlg.exec()
         return dlg.result
