@@ -293,6 +293,8 @@ class App:
             # 1.5 ISSUE-THM-02/03：加载内置莫奈主题 + 用户主题目录（用户同名覆盖内置）
             self.theme_manager.load_directory(BUILTIN_THEMES_DIR)
             self.theme_manager.load_user_directory()
+            # ISSUE-THM-06：同步自定义主题种子色（theme=="custom" 时 apply 实时派生）
+            self.theme_manager.set_custom_seed(loaded_config.settings.custom_theme_seed)
 
             # 2. 创建 UsageHistory（SQLite 建表，磁盘 IO）
             self._usage_history = UsageHistory()

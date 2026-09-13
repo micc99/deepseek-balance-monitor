@@ -6,7 +6,8 @@ import os
 import threading
 
 from event_bus import EventBus, EVENT_THEME_CHANGED
-from theme_models import Theme, ThemeLayer, MODE_DARK, MODE_LIGHT
+from theme_models import Theme, ThemeLayer, MODE_DARK, MODE_LIGHT, THEME_CUSTOM_NAME
+from theme_palette import derive_theme
 
 
 """主题管理器：主题注册表 + 应用切换 + 导入导出。
@@ -45,6 +46,12 @@ class ThemeManager:
         self._lock = threading.RLock()
         self._current_name: str = ""
         self._current_mode: str = MODE_DARK
+        # ISSUE-THM-06：custom 主题的种子色（App 从 config.settings.custom_theme_seed 同步）
+        self._custom_seed: str = ""
+
+    def set_custom_seed(self, seed: str) -> None:
+        """ISSUE-THM-06：更新自定义主题种子色（不立即重新应用，由 apply("custom") 消费）。"""
+        self._custom_seed = (seed or "").strip()
 
     # ---- 注册表 ----
 
@@ -95,12 +102,21 @@ class ThemeManager:
         """应用主题（可同时切换亮/暗模式），成功后广播 theme_changed。
 
         Args:
-            name: 主题名；未注册时 WARN 并返回 False（不改变当前状态）
+            name: 主题名；未注册时 WARN 并返回 False（不改变当前状态）。
+                  特殊值 THEME_CUSTOM_NAME（"custom"）按 custom_theme_seed
+                  实时派生完整色板并注册（ISSUE-THM-06）；种子无效返回 False。
             mode: MODE_LIGHT / MODE_DARK；None 表示沿用当前模式
 
         Returns:
             是否应用成功
         """
+        if name == THEME_CUSTOM_NAME:
+            # ISSUE-THM-06：每次 apply 实时派生（种子可能已变更），覆盖注册
+            try:
+                self.register(derive_theme(self._custom_seed))
+            except ValueError as e:
+                logger.warning("自定义主题种子色无效（%r）：%s", self._custom_seed, e)
+                return False
         theme = self.get(name)
         if theme is None:
             logger.warning("应用主题失败，主题未注册: %s", name)

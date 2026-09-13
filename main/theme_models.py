@@ -41,6 +41,9 @@ THEME_LAYER_FIELDS = (
 MODE_LIGHT = "light"
 MODE_DARK = "dark"
 
+# ISSUE-THM-06：自定义主题的特殊 name（apply 时按 custom_theme_seed 实时派生）
+THEME_CUSTOM_NAME = "custom"
+
 
 @dataclass
 class ThemeLayer:

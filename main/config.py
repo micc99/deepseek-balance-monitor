@@ -91,6 +91,8 @@ class SettingsConfig:
     # 亮/暗由 theme_mode 表达；旧配置的 theme:"dark"/"light" 在 load_config 运行时映射
     theme: str = "monet_water_lilies"
     theme_mode: str = "dark"  # 亮/暗模式："light" / "dark"（theme_models.MODE_* 值）
+    # ISSUE-THM-06：自定义主题种子色，theme=="custom" 时生效；仅存种子，不落 themes/ 目录
+    custom_theme_seed: str = ""
     autostart: bool = True
     ripple_color: str = "#aaddff"
     proxy_target: str = "api.deepseek.com"  # 代理转发目标，改为其他 provider 域名即可记录其用量
@@ -202,6 +204,7 @@ def load_config() -> AppConfig:
         interval_sec=s.get("interval_sec", 60),
         theme=theme_name,
         theme_mode=theme_mode,
+        custom_theme_seed=s.get("custom_theme_seed", ""),
         autostart=s.get("autostart", True),
         ripple_color=s.get("ripple_color", "#aaddff"),
         proxy_target=s.get("proxy_target", "api.deepseek.com"),
