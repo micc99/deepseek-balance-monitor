@@ -1,8 +1,8 @@
-customtkinter>=5.2.0
+# PySide6 锁 6.8 LTS：6.11 工具链的 VC 运行时导出与 Anaconda 自带 msvcp140 冲突（WinError 127）
+PySide6>=6.8,<6.9
 requests>=2.28.0
-pystray>=0.19.0
-Pillow>=9.0.0
-matplotlib>=3.9.0
-keyboard>=0.13.5
+pyqtgraph>=0.13
+pynput>=1.7
 
-#pyinstaller --windowed --icon=deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor v2.0" main.py
+# ISSUE-MIG-02：Qt 依赖换血（customtkinter/pystray/matplotlib/keyboard/Pillow 移除）
+# pyinstaller --windowed --icon=deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor v2.0" main.py
