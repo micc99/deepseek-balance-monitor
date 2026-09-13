@@ -1,3 +1,6 @@
+# ISSUE-MIG-08：注解延迟求值（启动异步化后 Manager 类型仅作 TYPE_CHECKING 注解）
+from __future__ import annotations
+
 __version__ = "1.9.3-mig"
 
 import os
@@ -18,16 +21,23 @@ from event_bus import (
     EVENT_ACCOUNT_DELETED,
     EVENT_ACCOUNT_UPDATED,
 )
-from balance_checker import set_provider_event_bus
-from usage_history import UsageHistory
 from managers.lifecycle_manager import LifecycleManager
 from managers.tray_manager import TrayManager
 from managers.hotkey_manager import HotkeyManager
 from managers.autostart_manager import AutostartManager
 from managers.theme_coordinator import ThemeCoordinator
 from managers.window_manager import WindowManager
-from managers.scheduler_manager import SchedulerManager
-from managers.proxy_manager import ProxyManager
+
+# ISSUE-MIG-08 启动异步化：scheduler/proxy/balance_checker 链含 requests
+# （实测 import ~345ms），推迟到后台线程加载，冷启动不为其买单。
+# 类型仅用于注解，运行时不触发 import：
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from balance_checker import set_provider_event_bus
+    from managers.scheduler_manager import SchedulerManager
+    from managers.proxy_manager import ProxyManager
+    from usage_history import UsageHistory
 
 logger = get_logger(__name__)
 
@@ -79,9 +89,10 @@ class App:
 
         self.config = AppConfig()
 
-        # ISSUE-ARC-02：应用级事件总线；Provider 注册表广播共用（ARC-06）
+        # ISSUE-ARC-02：应用级事件总线
         self.event_bus = EventBus()
-        set_provider_event_bus(self.event_bus)
+        # ISSUE-ARC-06：Provider 注册表广播接线在 _background_init 中
+        # （set_provider_event_bus 所在模块链含 requests，随启动异步化推迟）
         # ISSUE-THM-01/MIG-02：主题协调器（内置主题同步加载，保证首帧 QSS 正确；
         # 三个小 JSON 约 1ms，不构成 PFM-02 延迟加载的对象——那是给建表/端口留的）
         self.theme = ThemeCoordinator(self.event_bus, self.qt_app)
@@ -163,8 +174,20 @@ class App:
             self.windows.main_window.after(0, self.windows.show_main)
 
     def _background_init(self):
-        """ISSUE-PFM-02：磁盘 IO/建表/端口绑定全部在此后台线程执行。"""
+        """ISSUE-PFM-02：磁盘 IO/建表/端口绑定全部在此后台线程执行。
+
+        ISSUE-MIG-08 启动异步化：requests 链（scheduler/proxy/balance_checker/
+        usage_history）的重 import 也在本线程完成，冷启动不为其买单。
+        """
         try:
+            from balance_checker import set_provider_event_bus
+            from managers.proxy_manager import ProxyManager
+            from managers.scheduler_manager import SchedulerManager
+            from usage_history import UsageHistory
+
+            # ISSUE-ARC-06：Provider 注册表广播接线（此处 requests 链已就绪）
+            set_provider_event_bus(self.event_bus)
+
             loaded_config = load_config()
             self.config = loaded_config
             set_level(loaded_config.settings.log_level)
