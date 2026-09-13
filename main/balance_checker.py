@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 import logging
+import math
+import re
 import threading
 import time
 import requests
@@ -20,6 +22,9 @@ ISSUE-PFM-04：BaseProvider 持有按线程隔离的 requests.Session（threadin
 
 ISSUE-NET-03：_make_request 内置重试与指数退避（1s→2s→4s，最多 3 次），
 超时/连接错误/5xx 状态码触发重试，4xx 不重试。
+
+ISSUE-ARC-04：safe_float 容错数字解析——负数、科学计数法、千分位、
+货币符号、空值均正确处理，替代脆弱的 .replace(".","").isdigit() 判断。
 """
 
 logger = logging.getLogger(__name__)
@@ -31,6 +36,33 @@ _POOL_MAXSIZE = 10      # 单主机连接池最大连接数
 # ISSUE-NET-03：重试与退避配置
 _MAX_ATTEMPTS = 3  # 最大尝试次数（首次 + 2 次重试）
 _BACKOFF_SECONDS = [1, 2, 4]  # 指数退避间隔（秒），索引 0=首次重试前等待
+
+# ISSUE-ARC-04：合法十进制/科学计数法数字（用于拒绝 inf/nan/下划线等字面量）
+_NUMBER_RE = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
+
+
+def safe_float(value, default: float = 0.0) -> float:
+    """容错数字解析（ISSUE-ARC-04）。
+
+    - 支持常规小数、负数（-5.2）、科学计数法（1e-5）、千分位（1,000.50）、
+      货币符号（¥100.50 / $20.00）、前后空白
+    - 空字符串 / None / 非法文本 / inf / nan / 下划线数字（1_000）返回 default
+    """
+    if value is None:
+        return default
+    s = str(value).strip().replace(",", "").replace("¥", "").replace("$", "")
+    if not s:
+        return default
+    try:
+        result = float(s)
+    except (ValueError, TypeError):
+        return default
+    # 正则兜底：float() 会接受 inf/nan/1_000 等字面量，余额语境下一律视为非法
+    if not _NUMBER_RE.match(s):
+        return default
+    if math.isnan(result) or math.isinf(result):
+        return default
+    return result
 
 
 class BalanceStatus(Enum):
@@ -281,7 +313,8 @@ class SiliconFlowProvider(BaseProvider):
             granted_balance=granted,
         )]
         return BalanceInfo(
-            is_available=float(total) > 0,
+            # ISSUE-ARC-04：safe_float 容错解析，替代裸 float()（坏数据不再抛异常）
+            is_available=safe_float(total) > 0,
             balances=balances,
             status=BalanceStatus.OK,
         )
@@ -300,8 +333,9 @@ class MoonshotProvider(BaseProvider):
         inner = data.get("data", data)
         total = str(inner.get("available_balance", inner.get("balance", "0")))
         balances = [CurrencyBalance(currency="CNY", total_balance=total)]
+        # ISSUE-ARC-04：safe_float 替代 .replace(".","").isdigit()——负数/科学计数法/千分位不再误判
         return BalanceInfo(
-            is_available=float(total) > 0 if total.replace(".", "").isdigit() else True,
+            is_available=safe_float(total) > 0,
             balances=balances,
             status=BalanceStatus.OK,
         )
@@ -326,7 +360,8 @@ class OpenRouterProvider(BaseProvider):
             topped_up_balance=credits,
         )]
         return BalanceInfo(
-            is_available=float(credits) > 0,
+            # ISSUE-ARC-04：safe_float 容错解析
+            is_available=safe_float(credits) > 0,
             balances=balances,
             status=BalanceStatus.OK,
         )
@@ -345,8 +380,9 @@ class ZhipuProvider(BaseProvider):
         inner = data.get("data", data)
         total = str(inner.get("total_balance", inner.get("balance", "0")))
         balances = [CurrencyBalance(currency="CNY", total_balance=total)]
+        # ISSUE-ARC-04：safe_float 替代 .replace(".","").replace("-","").isdigit()
         return BalanceInfo(
-            is_available=float(total) > 0 if total.replace(".", "").replace("-", "").isdigit() else True,
+            is_available=safe_float(total) > 0,
             balances=balances,
             status=BalanceStatus.OK,
         )
