@@ -1,10 +1,13 @@
 import hashlib
+import logging
 import os
 import sqlite3
 import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 _USAGE_DB_DIR = os.path.join(os.path.expandvars("%APPDATA%"), "DeepSeekBalanceMonitor")
 _USAGE_DB_PATH = os.path.join(_USAGE_DB_DIR, "usage.db")
@@ -57,21 +60,43 @@ class UsageHistory:
     两张表共享同一个 DB 文件，但写入方不同：
     token_usage 由 usage_proxy / usage_logger 写入，
     balance_snapshots 由 main.py 的 _record_balance_snapshot 写入。
+
+    ISSUE-PFM-08：单连接复用 + WAL：
+    - __init__ 创建持久 sqlite3 连接（check_same_thread=False），全生命周期复用，
+      消除每操作建连开销
+    - PRAGMA journal_mode=WAL：写不阻塞读，读并发显著提升
+    - PRAGMA synchronous=NORMAL：WAL 下安全且 fsync 次数大幅减少
+    - 所有方法经 RLock 串行化（单连接本身不允许跨线程并发使用）
+    - close() 在应用退出时调用（App._quit）
     """
 
     def __init__(self, db_path: str = _USAGE_DB_PATH):
         self._db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        # ISSUE-PFM-08：持久单连接；check_same_thread=False + RLock 实现跨线程复用
+        self._conn = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._lock = threading.RLock()
+        # WAL 是库文件级持久设置，对 usage_logger 等其他连接同样生效
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        return conn
+        """返回持久连接（ISSUE-PFM-08）。调用方需持有 self._lock。"""
+        return self._conn
+
+    def close(self):
+        """ISSUE-PFM-08：关闭持久连接，释放 WAL 资源。App._quit 退出时调用。"""
+        with self._lock:
+            try:
+                self._conn.close()
+            except Exception as e:
+                logger.warning("关闭 UsageHistory 连接失败：%s", e)
 
     def _init_db(self):
-        with self._get_conn() as conn:
-            conn.execute("""
+        with self._lock:
+            self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS token_usage (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
                     api_key_hash TEXT    NOT NULL,
@@ -83,11 +108,11 @@ class UsageHistory:
                     cache_miss_tokens  INTEGER DEFAULT 0
                 )
             """)
-            conn.execute("""
+            self._conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_token_usage_hash_time
                 ON token_usage(api_key_hash, timestamp)
             """)
-            conn.execute("""
+            self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS balance_snapshots (
                     id           INTEGER PRIMARY KEY AUTOINCREMENT,
                     uid          TEXT    NOT NULL,
@@ -97,24 +122,24 @@ class UsageHistory:
                     currency     TEXT    NOT NULL
                 )
             """)
-            conn.execute("""
+            self._conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_balance_uid_time
                 ON balance_snapshots(uid, timestamp)
             """)
-            conn.commit()
+            self._conn.commit()
 
     def record_balance_snapshot(self, uid: str, api_key_hash: str, balance: float, currency: str):
         """记录一次余额快照，由调度器每次轮询后调用。"""
-        with self._get_conn() as conn:
-            conn.execute(
+        with self._lock:
+            self._conn.execute(
                 "INSERT INTO balance_snapshots (uid, api_key_hash, timestamp, balance, currency) VALUES (?, ?, ?, ?, ?)",
                 (uid, api_key_hash, time.time(), balance, currency),
             )
-            conn.commit()
+            self._conn.commit()
 
     def get_token_usage(self, api_key_hash: str, since: float) -> list[TokenUsageRecord]:
-        with self._get_conn() as conn:
-            rows = conn.execute(
+        with self._lock:
+            rows = self._conn.execute(
                 "SELECT timestamp, prompt_tokens, completion_tokens, total_tokens, cache_hit_tokens, cache_miss_tokens "
                 "FROM token_usage WHERE api_key_hash = ? AND timestamp >= ? "
                 "ORDER BY timestamp ASC",
@@ -133,8 +158,8 @@ class UsageHistory:
         ]
 
     def get_balance_history(self, uid: str, since: float) -> list[BalanceSnapshotRecord]:
-        with self._get_conn() as conn:
-            rows = conn.execute(
+        with self._lock:
+            rows = self._conn.execute(
                 "SELECT timestamp, balance, currency FROM balance_snapshots "
                 "WHERE uid = ? AND timestamp >= ? ORDER BY timestamp ASC",
                 (uid, since),
@@ -153,8 +178,8 @@ class UsageHistory:
         if not uids:
             return {}
         placeholders = ",".join("?" * len(uids))
-        with self._get_conn() as conn:
-            rows = conn.execute(
+        with self._lock:
+            rows = self._conn.execute(
                 f"""SELECT uid, balance FROM balance_snapshots
                     WHERE uid IN ({placeholders}) AND timestamp >= ?
                     AND id IN (
@@ -175,8 +200,8 @@ class UsageHistory:
         if not uids:
             return {}
         placeholders = ",".join("?" * len(uids))
-        with self._get_conn() as conn:
-            rows = conn.execute(
+        with self._lock:
+            rows = self._conn.execute(
                 f"""SELECT uid,
                            (SELECT balance FROM balance_snapshots
                             WHERE uid = bs.uid AND timestamp >= ?
@@ -199,8 +224,8 @@ class UsageHistory:
         return result
 
     def get_aggregated_usage(self, api_key_hash: str, since: float) -> AggregatedUsage:
-        with self._get_conn() as conn:
-            row = conn.execute(
+        with self._lock:
+            row = self._conn.execute(
                 """SELECT
                     COUNT(*) as total_requests,
                     COALESCE(SUM(prompt_tokens), 0) as total_prompt_tokens,
@@ -222,8 +247,8 @@ class UsageHistory:
         )
 
     def get_total_usage_all_keys(self, since: float) -> AggregatedUsage:
-        with self._get_conn() as conn:
-            row = conn.execute(
+        with self._lock:
+            row = self._conn.execute(
                 """SELECT
                     COUNT(*) as total_requests,
                     COALESCE(SUM(prompt_tokens), 0) as total_prompt_tokens,
@@ -246,10 +271,10 @@ class UsageHistory:
 
     def prune(self, retention_days: int = 30):
         cutoff = time.time() - retention_days * 86400
-        with self._get_conn() as conn:
-            conn.execute("DELETE FROM token_usage WHERE timestamp < ?", (cutoff,))
-            conn.execute("DELETE FROM balance_snapshots WHERE timestamp < ?", (cutoff,))
-            conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM token_usage WHERE timestamp < ?", (cutoff,))
+            self._conn.execute("DELETE FROM balance_snapshots WHERE timestamp < ?", (cutoff,))
+            self._conn.commit()
 
     def get_bucketed_usage(self, api_key_hash: str, since: float, bucket_sec: int) -> list[dict]:
         """Aggregate token_usage into time buckets.
@@ -263,8 +288,8 @@ class UsageHistory:
             bucket_start, requests, prompt_tokens, completion_tokens,
             total_tokens, cache_hit_tokens, cache_miss_tokens
         """
-        with self._get_conn() as conn:
-            rows = conn.execute(
+        with self._lock:
+            rows = self._conn.execute(
                 """SELECT
                     CAST((timestamp - ?) / ? AS INTEGER) AS bucket,
                     COUNT(*)                              AS requests,
@@ -311,8 +336,8 @@ class UsageHistory:
         if not api_key_hashes:
             return {}
         placeholders = ",".join("?" * len(api_key_hashes))
-        with self._get_conn() as conn:
-            rows = conn.execute(
+        with self._lock:
+            rows = self._conn.execute(
                 f"""SELECT api_key_hash, COALESCE(SUM(total_tokens), 0) as tokens
                     FROM token_usage
                     WHERE api_key_hash IN ({placeholders}) AND timestamp >= ?

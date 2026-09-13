@@ -591,6 +591,9 @@ class App:
 
         if self._usage_proxy is not None:
             self._usage_proxy.stop()
+        # ISSUE-PFM-08：退出时关闭 UsageHistory 持久连接，释放 WAL 资源
+        if self._usage_history is not None:
+            self._usage_history.close()
         # ISSUE-PFM-04：关闭所有 Provider 的 Session，释放连接池资源
         try:
             from balance_checker import close_all_provider_sessions
