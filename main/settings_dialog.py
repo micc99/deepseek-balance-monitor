@@ -46,12 +46,22 @@ class SettingsDialog(QDialog):
         "智谱 GLM": "open.bigmodel.cn",
     }
 
+    # ISSUE-THM-06：主题下拉 = 3 套莫奈预设 + 自定义（v1.6 用户决策顺序）
+    THEME_CHOICES = [
+        ("莫奈·睡莲", "monet_water_lilies"),
+        ("莫奈·日出印象", "monet_sunrise"),
+        ("莫奈·干草垛", "monet_haystacks"),
+        ("自定义", "custom"),
+    ]
+
     def __init__(
         self,
         parent,
         interval_sec: int,
         autostart: bool,
-        theme: str = "dark",
+        theme: str = "monet_water_lilies",
+        theme_mode: str = "dark",
+        custom_theme_seed: str = "",
         ripple_color: str = "#aaddff",
         proxy_target: str = "api.deepseek.com",
         proxy_token_display: str = "",
@@ -86,12 +96,49 @@ class SettingsDialog(QDialog):
         entry_row.addStretch(1)
         root.addLayout(entry_row)
 
+        # ISSUE-THM-06：主题身份下拉（3 预设 → 自定义）
         root.addWidget(QLabel("主题"))
         self._theme_combo = QComboBox()
-        self._theme_combo.addItems(["暗黑模式", "白色模式"])
-        self._theme_combo.setCurrentText("暗黑模式" if theme == "dark" else "白色模式")
+        self._theme_combo.addItems([label for label, _name in self.THEME_CHOICES])
+        current_name = theme if theme else "monet_water_lilies"
+        for label, name in self.THEME_CHOICES:
+            if name == current_name:
+                self._theme_combo.setCurrentText(label)
+                break
         self._theme_combo.setFixedWidth(150)
+        self._theme_combo.currentTextChanged.connect(self._on_theme_combo_changed)
         root.addWidget(self._theme_combo)
+
+        # 亮/暗模式独立选择
+        root.addWidget(QLabel("亮暗模式"))
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItems(["暗色", "亮色"])
+        self._mode_combo.setCurrentText("暗色" if theme_mode == "dark" else "亮色")
+        self._mode_combo.setFixedWidth(150)
+        root.addWidget(self._mode_combo)
+
+        # 自定义种子色行（仅选中"自定义"时可见）：取色器 + HEX 输入 + 预览
+        self._seed_row = QFrame()
+        seed_layout = QHBoxLayout(self._seed_row)
+        seed_layout.setContentsMargins(0, 0, 0, 0)
+        self._seed_color_btn = QPushButton("取色...")
+        self._seed_color_btn.setFixedWidth(70)
+        self._seed_color_btn.clicked.connect(self._on_pick_color)
+        seed_layout.addWidget(self._seed_color_btn)
+        self._seed_edit = QLineEdit(custom_theme_seed or "#5B8AA6")
+        self._seed_edit.setFixedWidth(90)
+        self._seed_edit.textChanged.connect(self._on_seed_text_changed)
+        seed_layout.addWidget(self._seed_edit)
+        self._seed_preview = QLabel()
+        self._seed_preview.setFixedSize(40, 24)
+        self._seed_preview.setStyleSheet(f"background-color: {self._seed_edit.text()}; border: 1px solid #888;")
+        seed_layout.addWidget(self._seed_preview)
+        self._seed_hint = QLabel("", objectName="muted")
+        seed_layout.addWidget(self._seed_hint)
+        seed_layout.addStretch(1)
+        self._seed_valid = True
+        root.addWidget(self._seed_row)
+        self._update_seed_row_visibility()
 
         root.addWidget(QLabel("波纹颜色"))
         self._ripple_combo = QComboBox()
@@ -147,12 +194,54 @@ class SettingsDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         root.addLayout(btn_row)
 
+    # ---- ISSUE-THM-06：自定义种子色交互 ----
+
+    def _on_theme_combo_changed(self, label: str):
+        self._update_seed_row_visibility()
+
+    def _update_seed_row_visibility(self):
+        self._seed_row.setVisible(self._theme_combo.currentText() == "自定义")
+
+    def _on_pick_color(self):
+        from PySide6.QtWidgets import QColorDialog
+        current = self._seed_edit.text().strip() or "#5B8AA6"
+        color = QColorDialog.getColor(_qcolor(current), self, "选择主题种子色")
+        # 取色器取消/关闭不改变当前主题（AC6）：无效色直接返回
+        if not color.isValid():
+            return
+        self._seed_edit.setText(color.name().upper())
+
+    def _on_seed_text_changed(self, text: str):
+        """HEX 实时校验：合法 → 预览同步；非法 → 行内提示并标红（保存时拦截）。"""
+        s = text.strip()
+        ok = True
+        try:
+            from theme_palette import hex_to_rgb
+            hex_to_rgb(s)
+        except ValueError:
+            ok = False
+        self._seed_valid = ok
+        shown = s if s.startswith("#") else "#" + s.lstrip("#")
+        if ok:
+            self._seed_hint.setText("")
+            self._seed_preview.setStyleSheet(
+                f"background-color: {shown}; border: 1px solid #888;")
+        else:
+            self._seed_hint.setText("HEX 格式：#RGB 或 #RRGGBB")
+            self._seed_preview.setStyleSheet("background-color: transparent; border: 1px dashed #f44336;")
+
     def _on_save(self):
         try:
             val = int(self._interval_edit.text().strip())
         except ValueError:
             return
-        theme = "dark" if self._theme_combo.currentText() == "暗黑模式" else "light"
+        if not self._seed_valid and self._theme_combo.currentText() == "自定义":
+            # 非法 HEX 拦截：提示修正，不关闭对话框
+            self._seed_hint.setText("HEX 格式非法，请修正后保存")
+            return
+        theme_name = dict(self.THEME_CHOICES).get(self._theme_combo.currentText(), "monet_water_lilies")
+        theme_mode = "dark" if self._mode_combo.currentText() == "暗色" else "light"
+        custom_seed = self._seed_edit.text().strip().upper() if theme_name == "custom" else ""
         ripple_color = self.RIPPLE_COLORS.get(self._ripple_combo.currentText(), "#aaddff")
         proxy_target = self.PROXY_TARGETS.get(self._proxy_combo.currentText(), self._proxy_combo.currentText())
         def _to_pynput(seq: QKeySequence) -> str:
@@ -166,7 +255,9 @@ class SettingsDialog(QDialog):
         self.result = (
             max(10, val),
             self._autostart_check.isChecked(),
-            theme,
+            theme_name,
+            theme_mode,
+            custom_seed,
             ripple_color,
             proxy_target,
             {
@@ -183,7 +274,9 @@ class SettingsDialog(QDialog):
         parent,
         interval_sec: int,
         autostart: bool,
-        theme: str = "dark",
+        theme: str = "monet_water_lilies",
+        theme_mode: str = "dark",
+        custom_theme_seed: str = "",
         ripple_color: str = "#aaddff",
         proxy_target: str = "api.deepseek.com",
         proxy_token_display: str = "",
@@ -195,6 +288,8 @@ class SettingsDialog(QDialog):
             interval_sec,
             autostart,
             theme,
+            theme_mode,
+            custom_theme_seed,
             ripple_color,
             proxy_target,
             proxy_token_display,
@@ -203,3 +298,11 @@ class SettingsDialog(QDialog):
         )
         dlg.exec()
         return dlg.result
+
+def _qcolor(hex_str: str):
+    from PySide6.QtGui import QColor
+    s = hex_str.strip()
+    if not s.startswith("#"):
+        s = "#" + s
+    c = QColor(s)
+    return c if c.isValid() else QColor("#5B8AA6")

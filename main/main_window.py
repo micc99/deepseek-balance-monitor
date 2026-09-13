@@ -312,7 +312,9 @@ class MainWindow(QMainWindow):
             self,
             self._config.settings.interval_sec,
             self._config.settings.autostart,
+            self._config.settings.theme,
             self._config.settings.theme_mode,
+            self._config.settings.custom_theme_seed,
             self._config.settings.ripple_color,
             self._config.settings.proxy_target,
             proxy_token_display=proxy_token_display,
@@ -320,12 +322,13 @@ class MainWindow(QMainWindow):
             auto_float_on_focus_loss=self._config.settings.auto_float_on_focus_loss,
         )
         if result is not None:
-            interval, autostart, mode, ripple_color, proxy_target, hotkeys, auto_float = result
+            interval, autostart, theme, mode, custom_seed, ripple_color, proxy_target, hotkeys, auto_float = result
             self._config.settings.interval_sec = interval
             self._config.settings.autostart = autostart
-            # ISSUE-THM-02：对话框返回的是亮暗模式（dark/light），写入 theme_mode；
-            # 主题身份 settings.theme 由 ThemeManager/Phase D 编辑器管理
+            # ISSUE-THM-06：主题身份/亮暗模式/自定义种子全部写入配置
+            self._config.settings.theme = theme
             self._config.settings.theme_mode = mode
+            self._config.settings.custom_theme_seed = custom_seed
             self._config.settings.ripple_color = ripple_color
             self._config.settings.proxy_target = proxy_target
             # ISSUE-UX-02/UX-04：快捷键与失焦行为写入配置，重绑窗口内快捷键
@@ -334,13 +337,15 @@ class MainWindow(QMainWindow):
             self.apply_hotkeys()
             self._update_interval_label()
             # ISSUE-ARC-02：设置变更整体经 settings_changed 事件广播，
-            # App 订阅后统一分派（调度器间隔/自启/全局热键/落盘）
+            # App 订阅后统一分派（主题应用/调度器间隔/自启/全局热键/落盘）
             self._event_bus.publish(
                 EVENT_SETTINGS_CHANGED,
                 payload={
                     "interval": interval,
                     "autostart": autostart,
+                    "theme": theme,
                     "theme_mode": mode,
+                    "custom_seed": custom_seed,
                     "ripple_color": ripple_color,
                     "proxy_target": proxy_target,
                     "hotkeys": hotkeys,

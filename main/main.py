@@ -163,6 +163,11 @@ class App:
             self.config.settings.interval_sec = max(10, interval)
             logger.info("配置尚未加载完成，间隔设置已暂存")
         self.autostart.set(bool(autostart))
+        # ISSUE-THM-06：主题身份/种子变更经 ThemeCoordinator 完整应用
+        # （apply_startup 内部广播 theme_changed → QSS 全窗重着色）
+        if self.theme is not None:
+            self.theme.sync_config(self.config)
+            self.theme.apply_startup(self.config)
         # ISSUE-UX-02：全局热键重注册（配置可能已变更）
         self.hotkeys.register_toggle(
             self.windows.toggle,
