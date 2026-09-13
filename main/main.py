@@ -1,7 +1,7 @@
 # ISSUE-MIG-08：注解延迟求值（启动异步化后 Manager 类型仅作 TYPE_CHECKING 注解）
 from __future__ import annotations
 
-__version__ = "1.9.3-mig"
+__version__ = "2.0.0"
 
 import os
 import sys

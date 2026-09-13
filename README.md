@@ -48,8 +48,7 @@
 | **定时自动刷新** | 可配置刷新间隔（最短 10 秒），余额变化实时感知 |
 | **系统托盘驻留** | 关闭窗口后仍在托盘运行，右键菜单快速唤起 |
 | **开机自启动** | 支持注册 Windows 启动项，开机自动后台监控 |
-| **深色 / 浅色主题** | 内置两种 UI 主题，一键切换 |
-| **波纹动画** | 鼠标点击自带水波纹特效，颜色可自定义 |
+| **莫奈主题** | 睡莲/日出印象/干草垛 3 套莫奈主题 + 自定义种子色派生（WCAG AA 校验） |
 | **多实例互斥** | 自动检测已有实例，防止重复启动 |
 
 ---
@@ -79,8 +78,8 @@
 ```bash
 git clone https://github.com/micc99/deepseek-balance-monitor.git
 cd deepseek-balance-monitor
-pip install -r requirements.txt
-python main.py
+pip install -r main/requirements.txt
+python main/main.py
 ```
 
 ---
@@ -100,7 +99,7 @@ python main.py
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --windowed --icon=deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor" main.py
+pyinstaller --onedir --windowed --icon=main/deepseek-balance-monitor.ico --name "DeepSeekBalanceMonitor" --add-data "main/themes;themes" main/main.py
 ```
 
 打包产物位于 `dist/DeepSeekBalanceMonitor.exe`。
@@ -112,11 +111,11 @@ pyinstaller --onefile --windowed --icon=deepseek-balance-monitor.ico --name "Dee
 ## 🧱 技术栈
 
 ```
-┌─────────────┐  ┌───────────┐  ┌───────────────┐
-│ customtkinte│  │   Pillow  │  │    pystray    │
-│   UI 框架   │  │  图标渲染  │  │   系统托盘    │
-└──────┬──────┘  └─────┬─────┘  └───────┬───────┘
-       └───────────────┼────────────────┘
+┌─────────────┐  ┌────────────┐  ┌────────────────────┐
+│   PySide6   │  │ pyqtgraph  │  │ QSystemTrayIcon    │
+│  Qt 6 UI    │  │  图表      │  │  系统托盘          │
+└──────┬──────┘  └─────┬──────┘  └─────────┬──────────┘
+       └───────────────┼───────────────────┘
                        ▼
               ┌─────────────────┐
               │    requests     │
@@ -128,9 +127,9 @@ pyinstaller --onefile --windowed --icon=deepseek-balance-monitor.ico --name "Dee
    DeepSeek API   SiliconFlow    Moonshot …
 ```
 
-- **[customtkinter](https://github.com/TomSchimansky/CustomTkinter)** — 现代化 Tkinter UI 框架
-- **[pystray](https://github.com/moses-palmer/pystray)** — 跨平台系统托盘
-- **[Pillow](https://python-pillow.org/)** — 图标与图像处理
+- **[PySide6](https://doc.qt.io/qtforpython/)** — Qt 6 官方 Python 绑定（LGPL，UI 框架）
+- **[pyqtgraph](https://pyqtgraph.readthedocs.io/)** — 高性能 Qt 图表（余额趋势/用量柱状图）
+- **[pynput](https://pynput.readthedocs.io/)** — 全局热键
 - **[requests](https://requests.readthedocs.io/)** — HTTP API 调用
 
 ---
@@ -139,20 +138,33 @@ pyinstaller --onefile --windowed --icon=deepseek-balance-monitor.ico --name "Dee
 
 ```
 deepseek-balance-monitor/
-├── main.py              # 程序入口 & 应用生命周期
-├── main_window.py       # 主窗口 UI
-├── floating_window.py   # 桌面悬浮窗
-├── balance_checker.py   # 各平台余额查询 Provider
-├── scheduler.py         # 定时刷新调度器
-├── config.py            # 配置读写 & 数据模型
-├── animations.py        # 波纹动画特效
-├── instance_lock.py     # 单实例互斥锁
-├── config.json          # 用户配置文件（运行时生成）
-├── requirements.txt     # Python 依赖
-├── assets/
-│   └── icon.png         # 应用图标
-├── .github/workflows/
-│   └── release.yml      # CI/CD 自动构建
+├── main/                    # 应用主包（flat import）
+│   ├── main.py              # 程序入口 & App 编排器
+│   ├── main_window.py       # Qt 主窗口
+│   ├── floating_window.py   # 桌面悬浮窗（无边框置顶）
+│   ├── settings_dialog.py   # 设置对话框
+│   ├── edit_account_dialog.py
+│   ├── account_row.py       # 账户行组件
+│   ├── usage_curve_window.py   # 余额趋势图（pyqtgraph）
+│   ├── usage_bar_window.py     # 用量概览图（pyqtgraph）
+│   ├── balance_checker.py   # 各平台余额查询 Provider
+│   ├── scheduler.py         # 定时刷新调度器
+│   ├── config.py            # 配置读写（原子写+滚动备份）
+│   ├── event_bus.py         # 应用事件总线
+│   ├── theme_models.py      # 主题数据模型
+│   ├── theme_manager.py     # 主题管理器
+│   ├── theme_palette.py     # 种子色派生 + WCAG 对比度
+│   ├── qss.py               # 主题 token → QSS 渲染
+│   ├── qt_bridge.py         # 跨线程 UI 调度桥
+│   ├── usage_history.py     # SQLite 用量历史（WAL）
+│   ├── usage_proxy.py       # 本地用量代理（127.0.0.1:52848）
+│   ├── credential_store.py  # API Key DPAPI 加密
+│   ├── mcp_server.py        # 独立 MCP 接口（FastMCP, stdio）
+│   ├── managers/            # App 拆分的 8 个职责 Manager
+│   ├── themes/              # 内置莫奈主题 JSON（3 套×亮暗）
+│   └── requirements.txt     # Python 依赖
+├── assets/                  # 应用图标
+├── .github/workflows/       # CI/CD 自动构建
 └── README.md
 ```
 
