@@ -1,2 +1,6 @@
 pytest>=8.0
 responses>=0.23
+# 重建 main/deepseek-balance-monitor.ico 用（真多尺寸 ICO；CI 打包环境无 Pillow，
+# PyInstaller 对伪 ICO 不再静默转换）：
+#   python -c "from PIL import Image; Image.open('assets/icon.png').convert('RGBA').save('main/deepseek-balance-monitor.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)], bitmap_format='bmp')"
+pillow>=10.0
