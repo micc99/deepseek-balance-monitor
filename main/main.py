@@ -32,7 +32,7 @@ from main_window import MainWindow
 from floating_window import FloatingWindow
 from instance_lock import InstanceLock
 from animations import AnimationHelper
-from balance_checker import BalanceStatus
+from balance_checker import BalanceStatus, set_provider_event_bus
 from theme_manager import ThemeManager
 from usage_history import UsageHistory
 from usage_proxy import UsageProxy
@@ -138,6 +138,8 @@ class App:
 
         # ISSUE-ARC-02：应用级事件总线，App 与各窗口/子系统解耦的中枢
         self.event_bus = EventBus()
+        # ISSUE-ARC-06：Provider 注册表广播 provider_registered 经同一总线
+        set_provider_event_bus(self.event_bus)
         # ISSUE-THM-01：主题管理器（App 持有唯一实例并注入依赖方）
         self.theme_manager = ThemeManager(event_bus=self.event_bus)
 

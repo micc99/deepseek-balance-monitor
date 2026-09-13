@@ -10,6 +10,8 @@ import time
 import requests
 from requests.adapters import HTTPAdapter
 
+from event_bus import EventBus, EVENT_PROVIDER_REGISTERED
+
 
 """多 Provider 余额查询抽象层。
 
@@ -398,19 +400,66 @@ PROVIDERS: dict[str, BaseProvider] = {
     "zhipu": ZhipuProvider(),
 }
 
+# ISSUE-ARC-06：注册表运行时可扩展——增删读改全程受锁保护，
+# 事件总线由 App 注入（set_provider_event_bus），注册成功广播 provider_registered
+_providers_lock = threading.RLock()
+_provider_event_bus: EventBus | None = None
+
+
+def set_provider_event_bus(bus: EventBus | None) -> None:
+    """注入事件总线（App 启动时调用；None 关闭广播，单测/脚本场景使用）。"""
+    global _provider_event_bus
+    _provider_event_bus = bus
+
 
 def get_provider(name: str) -> BaseProvider:
-    if name not in PROVIDERS:
-        raise ValueError(f"Unknown provider: {name}")
-    return PROVIDERS[name]
+    with _providers_lock:
+        if name not in PROVIDERS:
+            raise ValueError(f"Unknown provider: {name}")
+        return PROVIDERS[name]
 
 
-def register_provider(provider: BaseProvider):
-    PROVIDERS[provider.name] = provider
+def register_provider(provider: BaseProvider, replace: bool = True) -> None:
+    """ISSUE-ARC-06：运行时注册 Provider，立即生效（无需重启）。
+
+    - provider 必须是 BaseProvider 子类实例（含 name/label/description 与实现）
+    - 同名默认覆盖（replace=False 时遇同名抛 ValueError）
+    - 注册成功广播 provider_registered 事件（payload: name/label/description）
+    """
+    if not isinstance(provider, BaseProvider):
+        raise TypeError(f"provider 必须是 BaseProvider 实例，得到 {type(provider).__name__}")
+    if not provider.name or not provider.name.strip():
+        raise ValueError("provider.name 不能为空")
+    with _providers_lock:
+        if provider.name in PROVIDERS and not replace:
+            raise ValueError(f"Provider 已存在且不允许覆盖: {provider.name}")
+        PROVIDERS[provider.name] = provider
+    logger.info("Provider 已注册: name=%s label=%s", provider.name, provider.label)
+    if _provider_event_bus is not None:
+        _provider_event_bus.publish(
+            EVENT_PROVIDER_REGISTERED,
+            payload={
+                "name": provider.name,
+                "label": provider.label,
+                "description": provider.description,
+            },
+            source="balance_checker",
+        )
+
+
+def unregister_provider(name: str) -> bool:
+    """ISSUE-ARC-06：注销运行时 Provider。内置/不存在的名称返回 False。"""
+    with _providers_lock:
+        if name in PROVIDERS:
+            del PROVIDERS[name]
+            logger.info("Provider 已注销: name=%s", name)
+            return True
+        return False
 
 
 def get_provider_list() -> list[tuple[str, str, str]]:
-    return [(p.name, p.label, p.description) for p in PROVIDERS.values()]
+    with _providers_lock:
+        return [(p.name, p.label, p.description) for p in PROVIDERS.values()]
 
 
 def close_all_provider_sessions():
@@ -418,7 +467,9 @@ def close_all_provider_sessions():
 
     在应用退出时调用，释放连接池资源。
     """
-    for provider in PROVIDERS.values():
+    with _providers_lock:
+        providers = list(PROVIDERS.values())
+    for provider in providers:
         try:
             provider.close_all_sessions()
         except Exception as e:
