@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+import json
+import logging
+import threading
+
+from event_bus import EventBus, EVENT_THEME_CHANGED
+from theme_models import Theme, ThemeLayer, MODE_DARK, MODE_LIGHT
+
+
+"""主题管理器：主题注册表 + 应用切换 + 导入导出。
+
+ISSUE-THM-01：
+- register(theme) / apply(name) / export(path) / import(path) 四个核心 API
+- apply 成功后经事件总线广播 theme_changed，UI 订阅后实时重着色
+  （Phase D THM-05 消费该事件实现全窗刷新）
+- 零 UI 框架依赖（Phase A AC3，有测试断言），迁移 Qt 后原样存活
+
+实例策略：不做模块级单例/全局变量（用户决策），由 App 创建唯一实例
+并注入依赖方（de facto 单例，见 AGENTS.md §4 编排层）。
+
+线程模型：register/apply 可能被任意线程调用，注册表与当前状态由
+RLock 保护；theme_changed 广播在调用方线程同步发出，UI 订阅方
+自行 after(0) 调度（与 EventBus 契约一致）。
+"""
+
+logger = logging.getLogger(__name__)
+
+
+class ThemeManager:
+    """主题注册表与切换中枢。
+
+    Args:
+        event_bus: 应用事件总线；None 时静默（单测/无总线场景），
+                   apply 仍返回结果但不广播。
+    """
+
+    def __init__(self, event_bus: EventBus | None = None):
+        self._event_bus = event_bus
+        self._themes: dict[str, Theme] = {}
+        self._lock = threading.RLock()
+        self._current_name: str = ""
+        self._current_mode: str = MODE_DARK
+
+    # ---- 注册表 ----
+
+    def register(self, theme: Theme, replace: bool = True) -> None:
+        """注册主题；同名主题默认覆盖（THM-03 用户主题同名覆盖内置）。"""
+        with self._lock:
+            if theme.name in self._themes and not replace:
+                return
+            self._themes[theme.name] = theme
+        logger.debug("主题已注册: name=%s label=%s", theme.name, theme.label)
+
+    def get(self, name: str) -> Theme | None:
+        with self._lock:
+            return self._themes.get(name)
+
+    def names(self) -> list[str]:
+        """按注册顺序返回全部主题名（UI 下拉顺序的来源）。"""
+        with self._lock:
+            return list(self._themes.keys())
+
+    def labels(self) -> list[tuple[str, str]]:
+        """按注册顺序返回 (name, label) 对，供设置界面下拉直接使用。"""
+        with self._lock:
+            return [(t.name, t.label) for t in self._themes.values()]
+
+    # ---- 应用切换 ----
+
+    @property
+    def current_name(self) -> str:
+        return self._current_name
+
+    @property
+    def current_mode(self) -> str:
+        return self._current_mode
+
+    def current_theme(self) -> Theme | None:
+        with self._lock:
+            return self._themes.get(self._current_name)
+
+    def current_layer(self) -> ThemeLayer | None:
+        """当前生效的语义色层（name+mode 解析结果），未应用过返回 None。"""
+        theme = self.current_theme()
+        if theme is None:
+            return None
+        return theme.layer(self._current_mode)
+
+    def apply(self, name: str, mode: str | None = None) -> bool:
+        """应用主题（可同时切换亮/暗模式），成功后广播 theme_changed。
+
+        Args:
+            name: 主题名；未注册时 WARN 并返回 False（不改变当前状态）
+            mode: MODE_LIGHT / MODE_DARK；None 表示沿用当前模式
+
+        Returns:
+            是否应用成功
+        """
+        theme = self.get(name)
+        if theme is None:
+            logger.warning("应用主题失败，主题未注册: %s", name)
+            return False
+        with self._lock:
+            self._current_name = name
+            if mode in (MODE_LIGHT, MODE_DARK):
+                self._current_mode = mode
+            effective_mode = self._current_mode
+            layer = theme.layer(effective_mode)
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                EVENT_THEME_CHANGED,
+                payload={
+                    "name": name,
+                    "label": theme.label,
+                    "mode": effective_mode,
+                    "layer": layer,
+                    "ripple_color": theme.ripple_color,
+                },
+                source="theme_manager",
+            )
+        logger.info("主题已应用: name=%s label=%s mode=%s", name, theme.label, effective_mode)
+        return True
+
+    # ---- 导入 / 导出（THM-03 用户主题文件、THM-04 编辑器共用）----
+
+    def export(self, path: str, name: str | None = None) -> None:
+        """导出主题 JSON。name 为空时导出当前主题；未应用过抛 ValueError。"""
+        target = name if name is not None else self._current_name
+        theme = self.get(target)
+        if theme is None:
+            raise ValueError(f"主题未注册，无法导出: {target}")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(theme.to_dict(), f, ensure_ascii=False, indent=2)
+        logger.info("主题已导出: name=%s path=%s", theme.name, path)
+
+    def import_theme(self, path: str) -> Theme:
+        """从 JSON 导入主题并注册。文件缺失/格式错误抛异常（THM-03 降级处理）。"""
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        theme = Theme.from_dict(data)
+        self.register(theme)
+        logger.info("主题已导入: name=%s label=%s", theme.name, theme.label)
+        return theme
