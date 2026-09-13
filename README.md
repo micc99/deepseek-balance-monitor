@@ -160,7 +160,6 @@ deepseek-balance-monitor/
 │   ├── usage_history.py     # SQLite 用量历史（WAL）
 │   ├── usage_proxy.py       # 本地用量代理（127.0.0.1:52848）
 │   ├── credential_store.py  # API Key DPAPI 加密
-│   ├── mcp_server.py        # 独立 MCP 接口（FastMCP, stdio）
 │   ├── managers/            # App 拆分的 8 个职责 Manager
 │   ├── themes/              # 内置莫奈主题 JSON（3 套×亮暗）
 │   └── requirements.txt     # Python 依赖
