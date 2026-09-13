@@ -60,6 +60,7 @@ class WindowManager:
         on_view_curve: Callable,
         on_view_usage: Callable,
         version_title: str,
+        on_open_theme_editor: Callable | None = None,
     ) -> MainWindow:
         """创建主窗口并接线（原 App.run 前半段）。"""
         self.main_window = MainWindow(
@@ -69,6 +70,7 @@ class WindowManager:
             on_apply_theme=on_apply_theme,
             on_view_curve=on_view_curve,
             on_view_usage=on_view_usage,
+            on_open_theme_editor=on_open_theme_editor,
         )
         self.main_window.title(version_title)
         return self.main_window

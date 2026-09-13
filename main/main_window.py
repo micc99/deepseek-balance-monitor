@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         on_apply_theme: Callable | None = None,
         on_view_curve: Callable | None = None,
         on_view_usage: Callable | None = None,
+        on_open_theme_editor: Callable | None = None,
     ):
         super().__init__()
         self._config = config
@@ -79,6 +80,7 @@ class MainWindow(QMainWindow):
         self._on_apply_theme = on_apply_theme
         self._on_view_curve = on_view_curve
         self._on_view_usage = on_view_usage
+        self._on_open_theme_editor = on_open_theme_editor
         self._bridge = CallDispatcher(self)
         self._close_hides = True  # ISSUE-LOG-03 语义：点关闭 = 切悬浮窗；prepare_exit 后真退出
         self._destroyed = False
@@ -320,6 +322,7 @@ class MainWindow(QMainWindow):
             proxy_token_display=proxy_token_display,
             hotkeys=self._config.settings.hotkeys,
             auto_float_on_focus_loss=self._config.settings.auto_float_on_focus_loss,
+            on_open_theme_editor=self._on_open_theme_editor,
         )
         if result is not None:
             interval, autostart, theme, mode, custom_seed, ripple_color, proxy_target, hotkeys, auto_float = result

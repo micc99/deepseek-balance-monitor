@@ -67,6 +67,7 @@ class SettingsDialog(QDialog):
         proxy_token_display: str = "",
         hotkeys: dict | None = None,
         auto_float_on_focus_loss: bool = True,
+        on_open_theme_editor=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("设置")
@@ -139,6 +140,13 @@ class SettingsDialog(QDialog):
         self._seed_valid = True
         root.addWidget(self._seed_row)
         self._update_seed_row_visibility()
+
+        # ISSUE-THM-04：主题编辑器入口（非模态窗口，由 App 按需创建）
+        self._on_open_theme_editor = on_open_theme_editor
+        if on_open_theme_editor is not None:
+            editor_btn = QPushButton("主题编辑器…", objectName="flat")
+            editor_btn.clicked.connect(self._on_open_theme_editor)
+            root.addWidget(editor_btn)
 
         root.addWidget(QLabel("波纹颜色"))
         self._ripple_combo = QComboBox()
@@ -282,6 +290,7 @@ class SettingsDialog(QDialog):
         proxy_token_display: str = "",
         hotkeys: dict | None = None,
         auto_float_on_focus_loss: bool = True,
+        on_open_theme_editor=None,
     ):
         dlg = cls(
             parent,
@@ -295,6 +304,7 @@ class SettingsDialog(QDialog):
             proxy_token_display,
             hotkeys,
             auto_float_on_focus_loss,
+            on_open_theme_editor,
         )
         dlg.exec()
         return dlg.result

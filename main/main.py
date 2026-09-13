@@ -125,6 +125,7 @@ class App:
             on_view_curve=self.windows.open_curve_window,
             on_view_usage=self.windows.open_usage_window,
             version_title=f"DeepSeek 余额监控 v{__version__}",
+            on_open_theme_editor=self._open_theme_editor,
         )
         self._wire_events()
         self.windows.set_status("正在加载配置...")
@@ -183,6 +184,22 @@ class App:
         threading.Thread(target=self._background_init, daemon=True, name="AppInit").start()
         self.tray = TrayManager(ICON_PATH, "DeepSeek 余额监控", self._on_tray_show, self._quit)
         self.tray.start()
+
+    def _open_theme_editor(self):
+        """ISSUE-THM-04：打开主题编辑器（非模态，单实例复用）。"""
+        from theme_manager import DEFAULT_USER_THEMES_DIR
+        from theme_editor_window import ThemeEditorWindow
+        if getattr(self, "_theme_editor", None) is None or not self._theme_editor.winfo_exists():
+            self._theme_editor = ThemeEditorWindow(
+                self.windows.main_window,
+                theme_manager=self.theme.theme_manager,
+                builtin_dir=BUILTIN_THEMES_DIR,
+                user_dir=DEFAULT_USER_THEMES_DIR,
+                event_bus=self.event_bus,
+            )
+        self._theme_editor.show()
+        self._theme_editor.raise_()
+        self._theme_editor.activateWindow()
 
     def _on_tray_show(self):
         if self.windows.main_window:
