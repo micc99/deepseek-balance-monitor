@@ -9,17 +9,21 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
-            artifact_name: DeepSeekBalanceMonitor-windows.exe
-            pyinstaller_args: --onefile --windowed --icon=deepseek-balance-monitor.ico
+            artifact_name: DeepSeekBalanceMonitor-windows
+            sep: ";"
+            icon_args: --icon=deepseek-balance-monitor.ico
           - os: macos-latest
             artifact_name: DeepSeekBalanceMonitor-macos
-            pyinstaller_args: --onefile --windowed
+            sep: ":"
+            icon_args: ""
           - os: ubuntu-latest
             artifact_name: DeepSeekBalanceMonitor-linux
-            pyinstaller_args: --onefile
+            sep: ":"
+            icon_args: ""
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python 3.10
@@ -29,22 +33,22 @@ jobs:
       - name: Install dependencies
         run: |
           cd main
-          pip install pyinstaller pillow
+          pip install pyinstaller
           pip install -r requirements.txt
-      - name: Build executable
+      - name: Build executable (onedir, PySide6)
         run: |
           cd main
-          pyinstaller ${{ matrix.pyinstaller_args }} --name "DeepSeekBalanceMonitor" main.py
-      - name: Rename artifact (Linux/macOS)
+          pyinstaller --onedir --windowed --name "DeepSeekBalanceMonitor" ${{ matrix.icon_args }} --add-data "themes${{ matrix.sep }}themes" main.py
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path main/dist/DeepSeekBalanceMonitor -DestinationPath main/dist/${{ matrix.artifact_name }}.zip
+      - name: Package artifact (macOS/Linux)
         if: runner.os != 'Windows'
         run: |
-          mv main/dist/DeepSeekBalanceMonitor main/dist/${{ matrix.artifact_name }}
-          chmod +x main/dist/${{ matrix.artifact_name }}
-      - name: Rename artifact (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          mv main/dist/DeepSeekBalanceMonitor.exe main/dist/${{ matrix.artifact_name }}
+          cd main/dist
+          zip -qry ../${{ matrix.artifact_name }}.zip DeepSeekBalanceMonitor
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: main/dist/${{ matrix.artifact_name }}
+          files: main/dist/${{ matrix.artifact_name }}.zip
