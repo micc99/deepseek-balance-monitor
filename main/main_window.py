@@ -5,6 +5,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -304,7 +305,54 @@ class MainWindow(QMainWindow):
         self.status_label.setText(text)
 
     def start_focus_monitor(self):
-        """ISSUE-PFM-05：焦点监视，随 ISSUE-MIG-04 在 Qt 事件模型下实装。"""
+        """ISSUE-PFM-05（Qt 实装，ISSUE-MIG-04）：事件驱动焦点监视。
+
+        QApplication 级 eventFilter 捕获本窗口的 FocusIn/FocusOut（对应
+        ctk 版 bind_all）；FocusOut 起 300ms 单发防抖计时器，FocusIn 取消；
+        触发后校验可见 QDialog 子对话框，存在则不切悬浮窗。
+        """
+        if getattr(self, "_focus_monitor_installed", False):
+            return
+        self._focus_monitor_installed = True
+        from PySide6.QtCore import QTimer
+        self._focus_check_id = QTimer(self)
+        self._focus_check_id.setSingleShot(True)
+        self._focus_check_id.setInterval(300)
+        self._focus_check_id.timeout.connect(self._on_focus_loss_confirmed)
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        from PySide6.QtCore import QEvent
+        if watched is self:
+            if event.type() == QEvent.FocusOut:
+                # ISSUE-PFM-05：300ms 防抖，过滤瞬时焦点切换
+                self._focus_check_id.start()
+            elif event.type() == QEvent.FocusIn:
+                self._focus_check_id.stop()
+        return super().eventFilter(watched, event)
+
+    def _on_focus_in(self, _event=None):
+        """ISSUE-PFM-05：FocusIn 取消挂起的防抖计时器（保留 ctk 版同名入口）。"""
+        if getattr(self, "_focus_check_id", None) is not None:
+            self._focus_check_id.stop()
+
+    def _on_focus_out(self, _event=None):
+        """ISSUE-PFM-05：FocusOut 起防抖计时器（保留 ctk 版同名入口）。"""
+        if getattr(self, "_focus_check_id", None) is not None:
+            self._focus_check_id.start()
+
+    def _on_focus_loss_confirmed(self):
+        """ISSUE-PFM-05：300ms 防抖后确认焦点丢失，校验子对话框后切悬浮窗。"""
+        if not self.winfo_exists() or not self.isVisible():
+            return
+        # 校验子对话框：有可见 QDialog 时不切（避免对话框抢焦点误判）
+        from PySide6.QtWidgets import QDialog
+        for w in self.findChildren(QDialog):
+            if w.isVisible():
+                return
+        self.hide()
+        if self._on_switch_to_floating:
+            self._on_switch_to_floating()
 
     def set_proxy_token_provider(self, provider: Callable[[], str]):
         """ISSUE-SEC-04：同步查询接口（ARC-02 决策：查询非事件）。"""

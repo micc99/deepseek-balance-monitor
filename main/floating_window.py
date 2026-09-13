@@ -2,19 +2,19 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QLabel, QMenu, QVBoxLayout, QWidget
 
 from config import WindowConfig
 
 
-"""无边框悬浮窗（Qt 版，ISSUE-MIG-02 外壳；拖拽/双击/右键随 ISSUE-MIG-04 实装）。
+"""无边框悬浮窗（Qt 版，ISSUE-MIG-04 完整实装）。
 
-主窗口最小化/关闭后显示，置顶。由 WindowManager 按需创建和销毁。
+主窗口最小化/关闭后显示，置顶、可拖拽、双击恢复主窗、右键菜单。
+由 WindowManager 按需创建和销毁。
 Stack 兼容面（protocol/get_position/set_position/update_balance/
 destroy/winfo_exists/deiconify/lift/focus）与 ctk 版同名，保证
-WindowManager 双栈零改动。
+WindowManager 双栈零改动。D6：淡入淡出动画不迁移。
 """
 
 
@@ -33,6 +33,7 @@ class FloatingWindow(QWidget):
         self._close_cb: Optional[Callable] = None
         self._destroyed = False
         self.destroyed.connect(self._mark_destroyed)
+        self._drag_offset = QPoint()
 
         self.setFixedSize(260, 120)
         self.setWindowTitle("余额监控")
@@ -51,7 +52,43 @@ class FloatingWindow(QWidget):
         layout.addWidget(self._title_label)
         layout.addWidget(self._balance_label)
         layout.addWidget(self._status_label)
-        # ISSUE-MIG-04：拖拽/双击恢复/右键菜单随后实装
+
+    # ---- 拖拽 / 双击 / 右键（ISSUE-MIG-04）----
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        # LeftButton 按住拖动（Qt 自动限频，无需手动节流）
+        if event.buttons() & Qt.LeftButton and not self._drag_offset.isNull():
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_offset = QPoint()
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton and self._on_restore:
+            self._on_restore()
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        if self._on_refresh:
+            act_refresh = QAction("立即刷新", menu)
+            act_refresh.triggered.connect(self._on_refresh)
+            menu.addAction(act_refresh)
+            menu.addSeparator()
+        act_exit = QAction("退出", menu)
+        act_exit.triggered.connect(self._on_exit)
+        menu.addAction(act_exit)
+        menu.exec(event.globalPos())
+
+    def _on_exit(self):
+        if self._on_exit_cb:
+            self._on_exit_cb()
 
     # ---- WindowManager 兼容面 ----
 
