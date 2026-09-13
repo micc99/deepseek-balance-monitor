@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QGuiApplication
 from PySide6.QtWidgets import QLabel, QMenu, QVBoxLayout, QWidget
 
 from config import WindowConfig
@@ -116,9 +116,30 @@ class FloatingWindow(QWidget):
 
     def set_position(self, pos: WindowConfig) -> None:
         if pos is not None and pos.x is not None and pos.y is not None:
-            self.move(pos.x, pos.y)
+            self.move(*self._clamped_position(pos.x, pos.y))
         else:
             self._center_on_screen()
+
+    def _clamped_position(self, x: int, y: int) -> tuple:
+        """ISSUE-BUG-03：恢复位置钳制到可见屏幕可用区内。
+
+        旧版 tkinter 坐标是物理像素、Qt move() 是逻辑像素（dpr≠1 时越界），
+        换显示器/拔显示器/改分辨率同样会产生屏外坐标——悬浮窗整体落在
+        屏外时用户无法双击恢复。取距目标点最近的屏幕做钳制。
+        """
+        screens = QGuiApplication.screens()
+        if not screens:
+            return x, y
+
+        def outside_dist(geo) -> int:
+            dx = max(geo.left() - x, 0, x - geo.right())
+            dy = max(geo.top() - y, 0, y - geo.bottom())
+            return dx + dy
+
+        geo = min(screens, key=lambda s: outside_dist(s.availableGeometry())).availableGeometry()
+        cx = min(max(x, geo.left()), max(geo.left(), geo.right() - self.width() + 1))
+        cy = min(max(y, geo.top()), max(geo.top(), geo.bottom() - self.height() + 1))
+        return cx, cy
 
     def _center_on_screen(self) -> None:
         screen = self.screen()
