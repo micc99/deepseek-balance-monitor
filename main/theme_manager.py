@@ -27,6 +27,9 @@ RLock 保护；theme_changed 广播在调用方线程同步发出，UI 订阅方
 
 logger = logging.getLogger(__name__)
 
+# ISSUE-THM-03：用户主题目录（THM-02 内置主题同名时可被用户版本覆盖）
+DEFAULT_USER_THEMES_DIR = os.path.expanduser(os.path.join("~", ".deepseek-monitor", "themes"))
+
 
 class ThemeManager:
     """主题注册表与切换中枢。
@@ -148,6 +151,36 @@ class ThemeManager:
                 loaded.append(theme.name)
             except (ValueError, json.JSONDecodeError, OSError) as e:
                 logger.warning("主题文件加载失败已跳过: %s (%s)", fpath, e)
+        return loaded
+
+    def load_user_directory(self, path: str = DEFAULT_USER_THEMES_DIR) -> list[str]:
+        """ISSUE-THM-03：加载用户主题目录（默认 ~/.deepseek-monitor/themes/）。
+
+        在内置主题之后调用，同名用户主题即覆盖内置版本。
+        """
+        loaded = self.load_directory(path, replace=True)
+        if loaded:
+            logger.info("已加载用户主题: %s", loaded)
+        return loaded
+
+    def rescan(self, builtin_dir: str, user_dir: str = DEFAULT_USER_THEMES_DIR) -> list[str]:
+        """ISSUE-THM-03：热加载——重新扫描内置 + 用户目录并重建注册表。
+
+        以目录内容为准：
+        - 新增/修改的主题文件生效（编辑器保存后无需重启）
+        - 被删除的用户主题覆盖回落到内置版本；用户独有主题被移除
+        - 运行时程序化注册的主题（如 THM-06 custom）会被清空，
+          由其归属流程在下次 apply 时重建
+
+        Returns:
+            重扫后注册表中的全部主题名（内置顺序 + 用户覆盖新增）
+        """
+        with self._lock:
+            self._themes.clear()
+        loaded = self.load_directory(builtin_dir)
+        if user_dir:
+            loaded += self.load_directory(user_dir)
+        logger.info("主题热加载完成，共 %d 个主题", len(self.names()))
         return loaded
 
     # ---- 导入 / 导出（THM-03 用户主题文件、THM-04 编辑器共用）----

@@ -288,8 +288,9 @@ class App:
             set_level(loaded_config.settings.log_level)
             logger.info("应用启动，版本 %s，日志级别 %s", __version__, loaded_config.settings.log_level)
 
-            # 1.5 ISSUE-THM-02：加载内置莫奈主题（3 个小 JSON，随包分发）
+            # 1.5 ISSUE-THM-02/03：加载内置莫奈主题 + 用户主题目录（用户同名覆盖内置）
             self.theme_manager.load_directory(BUILTIN_THEMES_DIR)
+            self.theme_manager.load_user_directory()
 
             # 2. 创建 UsageHistory（SQLite 建表，磁盘 IO）
             self._usage_history = UsageHistory()
