@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import shutil
 import sys
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -18,6 +19,9 @@ else:
     CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 logger = logging.getLogger(__name__)
+
+# ISSUE-CFG-02：滚动备份保留份数（bak.0 最新，bak.2 最旧）
+_BACKUP_KEEP = 3
 
 
 def _generate_uid() -> str:
@@ -102,12 +106,60 @@ class AppConfig:
     settings: SettingsConfig = field(default_factory=SettingsConfig)
 
 
+def _rotate_backups(config_path: str):
+    """ISSUE-CFG-02：写入前滚动备份。
+
+    bak 编号越大越旧：bak.1→bak.2、bak.0→bak.1，当前配置复制为 bak.0，
+    超出 _BACKUP_KEEP 的最旧备份自然被顶掉。
+    """
+    for i in range(_BACKUP_KEEP - 1, 0, -1):
+        src = f"{config_path}.bak.{i - 1}"
+        dst = f"{config_path}.bak.{i}"
+        if os.path.exists(src):
+            os.replace(src, dst)
+    if os.path.exists(config_path):
+        shutil.copy2(config_path, f"{config_path}.bak.0")
+
+
+def _try_load_backup() -> Optional[dict]:
+    """ISSUE-CFG-02：按新到旧尝试加载备份，成功即回写主文件并返回数据。
+
+    全部不可用返回 None。
+    """
+    for i in range(_BACKUP_KEEP):
+        bak = f"{CONFIG_PATH}.bak.{i}"
+        if not os.path.exists(bak):
+            continue
+        try:
+            with open(bak, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("备份不可用 %s：%s", bak, e)
+            continue
+        try:
+            shutil.copy2(bak, CONFIG_PATH)
+        except OSError as e:
+            logger.warning("备份回写主文件失败：%s", e)
+        return data
+    return None
+
+
 def load_config() -> AppConfig:
     if not os.path.exists(CONFIG_PATH):
         return AppConfig()
 
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        # ISSUE-CFG-02：主配置读取失败（损坏/被占用）自动回退最近备份
+        recovered = _try_load_backup()
+        if recovered is not None:
+            logger.warning("config.json 读取失败（%s），已回退到备份", e)
+            data = recovered
+        else:
+            logger.error("config.json 读取失败且无可用备份")
+            raise
 
     accounts = []
     for a in data.get("accounts", []):
@@ -185,8 +237,25 @@ def save_config(config: AppConfig):
         "window": asdict(config.window),
         "settings": asdict(config.settings),
     }
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+    # ISSUE-CFG-02：先滚动备份旧配置，再经临时文件 + os.replace 原子替换，
+    # 磁盘满/进程被杀等中途失败不会损坏既有配置
+    try:
+        _rotate_backups(CONFIG_PATH)
+    except OSError as e:
+        logger.warning("配置备份失败（继续写入）：%s", e)
+    tmp_path = CONFIG_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    try:
+        os.replace(tmp_path, CONFIG_PATH)  # Windows 同盘内为原子操作
+    except OSError:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def mask_api_key(key: str) -> str:
