@@ -159,6 +159,10 @@ class FloatingWindow(QWidget):
         return not self._destroyed
 
     def destroy(self) -> None:
+        # ISSUE-BUG-04：程序化销毁≠用户关闭请求。tkinter 的 destroy() 不触发
+        # WM_DELETE_WINDOW 协议回调，Qt 的 close() 却总发送 closeEvent——不摘除
+        # _close_cb 会让 show_main 的正常销毁步骤误触发"退出应用"（仿真实测 exit 0）。
+        self._close_cb = None
         self._mark_destroyed()
         self.close()
         self.deleteLater()
