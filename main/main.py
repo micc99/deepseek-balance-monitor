@@ -19,6 +19,15 @@ from config import load_config, save_config, AppConfig
 from log_setup import setup_logging, get_logger, set_level
 from error_logger import log_exception
 from scheduler import BalanceScheduler, BalanceResult
+from event_bus import (
+    EventBus,
+    Event,
+    EVENT_REFRESH_REQUESTED,
+    EVENT_SETTINGS_CHANGED,
+    EVENT_ACCOUNT_ADDED,
+    EVENT_ACCOUNT_DELETED,
+    EVENT_ACCOUNT_UPDATED,
+)
 from main_window import MainWindow
 from floating_window import FloatingWindow
 from instance_lock import InstanceLock
@@ -124,6 +133,9 @@ class App:
         self._loaded = False
         self._load_error: str = ""
 
+        # ISSUE-ARC-02：应用级事件总线，App 与各窗口/子系统解耦的中枢
+        self.event_bus = EventBus()
+
         # ISSUE-PFM-02：先用空 AppConfig 创建 MainWindow，磁盘 IO 延迟到后台线程
         # 这样首屏渲染不等待 load_config / UsageHistory 建表 / UsageProxy 端口绑定
         self.config = AppConfig()
@@ -190,16 +202,16 @@ class App:
     def run(self):
         self.main_window = MainWindow(
             self.config,
+            event_bus=self.event_bus,
             on_switch_to_floating=self._show_floating,
             on_apply_theme=self._apply_theme,
+            # ISSUE-ARC-02：App→窗口的导航命令经构造注入（原 set_view_curve_callback 等）
+            on_view_curve=self._on_view_curve,
+            on_view_usage=self._on_view_usage,
         )
         self.main_window.title(f"DeepSeek 余额监控 v{__version__}")
-        self.main_window.set_refresh_callback(self._on_manual_refresh_during_load)
-        self.main_window.set_settings_callback(self._on_settings_during_load)
-        self.main_window.set_autostart_callback(_set_autostart)
-        self.main_window.set_save_callback(lambda: save_config(self.config))
-        self.main_window.set_view_curve_callback(self._on_view_curve)
-        self.main_window.set_view_usage_callback(self._on_view_usage)
+        # ISSUE-ARC-02：一次性订阅窗口事件，替代加载期/加载后两轮 setter 换绑
+        self._wire_events()
         # ISSUE-PFM-02：首屏空状态显示"加载中..."友好提示
         self.main_window.set_status("正在加载配置...")
 
@@ -214,20 +226,42 @@ class App:
         print("__STARTUP_DONE__", flush=True)
         self.main_window.mainloop()
 
-    def _on_manual_refresh_during_load(self):
-        """ISSUE-PFM-02：加载完成前的刷新请求转发（加载完成后由 scheduler 处理）。"""
+    def _wire_events(self):
+        """ISSUE-ARC-02：订阅 MainWindow 发布的事件，替代 6 个 setter 回调注入。
+
+        刷新/设置在加载期与加载完成后行为不同，统一在 handler 内按
+        scheduler 是否就绪分派（PFM-02 状态门模式），不再反复换绑回调。
+        """
+        bus = self.event_bus
+        bus.subscribe(EVENT_REFRESH_REQUESTED, self._on_refresh_requested)
+        bus.subscribe(EVENT_SETTINGS_CHANGED, self._on_settings_changed)
+        bus.subscribe(EVENT_ACCOUNT_ADDED, self._on_accounts_changed)
+        bus.subscribe(EVENT_ACCOUNT_UPDATED, self._on_accounts_changed)
+        bus.subscribe(EVENT_ACCOUNT_DELETED, self._on_accounts_changed)
+
+    def _on_refresh_requested(self, event: Event):
+        """刷新请求：调度器就绪则刷新，否则忽略（原 _on_manual_refresh_during_load）。"""
         if self.scheduler is not None:
             self.scheduler.refresh_all_now()
         else:
             logger.info("配置尚未加载完成，刷新请求已忽略")
 
-    def _on_settings_during_load(self, interval: int):
-        """ISSUE-PFM-02：加载完成前的设置变更（仅记录，加载后由 scheduler 应用）。"""
+    def _on_settings_changed(self, event: Event):
+        """设置变更：分派给调度器并落盘（原 _on_settings_during_load + autostart/save 回调）。"""
+        payload = event.payload
+        interval = int(payload.get("interval") or 0)
+        autostart = payload.get("autostart")
         if self.scheduler is not None:
-            self.scheduler.set_settings(interval)
+            self.scheduler.set_settings(interval, autostart)
         else:
             self.config.settings.interval_sec = max(10, interval)
             logger.info("配置尚未加载完成，间隔设置已暂存")
+        _set_autostart(bool(autostart))
+        save_config(self.config)
+
+    def _on_accounts_changed(self, event: Event):
+        """账户增删改/排序：统一落盘（原 set_save_callback 的 lambda）。"""
+        save_config(self.config)
 
     def _deferred_init(self):
         """启动后台加载线程 + 托盘图标。"""
@@ -296,9 +330,7 @@ class App:
         # 更新 MainWindow 的 config 引用并重建账户列表
         self.main_window._config = self.config
         self.main_window._rebuild_account_list()
-        # 重新注入 scheduler 回调（加载完成后才能真正刷新）
-        self.main_window.set_refresh_callback(self.scheduler.refresh_all_now)
-        self.main_window.set_settings_callback(self.scheduler.set_settings)
+        # ISSUE-ARC-02：刷新/设置已改事件订阅（_wire_events 一次性接线），加载后无需换绑
         # ISSUE-SEC-04：注入 token 提供者，供设置面板展示 token hash
         self.main_window.set_proxy_token_provider(self._usage_proxy.get_proxy_token)
 

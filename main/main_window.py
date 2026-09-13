@@ -12,6 +12,15 @@ from edit_account_dialog import EditAccountDialog
 from settings_dialog import SettingsDialog
 from account_row import AccountRow
 from error_logger import log_exception
+# ISSUE-ARC-02：事件总线替代 6 个 setter 回调注入
+from event_bus import (
+    EventBus,
+    EVENT_REFRESH_REQUESTED,
+    EVENT_SETTINGS_CHANGED,
+    EVENT_ACCOUNT_ADDED,
+    EVENT_ACCOUNT_DELETED,
+    EVENT_ACCOUNT_UPDATED,
+)
 
 
 """主窗口：账户列表管理、余额显示、设置入口。
@@ -21,6 +30,10 @@ from error_logger import log_exception
 - 余额实时更新（调度器回调 → AccountRow）
 - 焦点丢失自动切换到悬浮窗
 - 设置对话框（间隔/主题/波纹/代理目标）
+
+ISSUE-ARC-02：窗口只 publish 事件（刷新/设置变更/账户变更），
+App 在 _wire_events 中订阅分派；App→窗口的导航命令（趋势图/用量概览）
+是"命令"而非"事件"，经构造参数注入（on_view_curve / on_view_usage）。
 """
 
 
@@ -29,19 +42,26 @@ class MainWindow(ctk.CTk):
     CLOSE_ACTION_HIDE = "hide"
     CLOSE_ACTION_EXIT = "exit"
 
-    def __init__(self, config: AppConfig, on_switch_to_floating: Callable = None, on_apply_theme: Callable = None):
+    def __init__(
+        self,
+        config: AppConfig,
+        event_bus: EventBus | None = None,
+        on_switch_to_floating: Callable = None,
+        on_apply_theme: Callable = None,
+        on_view_curve: Callable = None,
+        on_view_usage: Callable = None,
+    ):
         super().__init__()
         self._config = config
+        # ISSUE-ARC-02：事件总线注入；未提供时用私有实例，保证 publish 路径统一
+        self._event_bus = event_bus if event_bus is not None else EventBus()
+        # App→窗口的导航命令经构造注入（ISSUE-ARC-02：原 set_view_curve_callback / set_view_usage_callback）
+        self._on_view_curve = on_view_curve
+        self._on_view_usage = on_view_usage
         self._on_switch_to_floating = on_switch_to_floating
         self._on_apply_theme = on_apply_theme
         self._account_rows: list[AccountRow] = []
         self._close_action = self.CLOSE_ACTION_HIDE
-        self._schedule_callback: Optional[Callable] = None
-        self._settings_callback: Optional[Callable] = None
-        self._autostart_callback: Optional[Callable] = None
-        self._save_callback: Optional[Callable] = None
-        self._on_view_curve_callback: Optional[Callable] = None
-        self._on_view_usage_callback: Optional[Callable] = None
         self._focus_check_id: Optional[str] = None
 
         self._drag_active = False
@@ -251,7 +271,7 @@ class MainWindow(ctk.CTk):
                 acc,
                 on_edit=self._on_edit_account,
                 on_delete=self._on_delete_account,
-                on_view_curve=self._on_view_curve_callback,
+                on_view_curve=self._on_view_curve,
             )
             row.pack(fill="x", pady=2)
             row.key_label.bind("<ButtonPress-1>", lambda e, i=idx: self._on_drag_press(i, e))
@@ -358,7 +378,12 @@ class MainWindow(ctk.CTk):
             acc = self._config.accounts.pop(src)
             self._config.accounts.insert(tgt, acc)
             self._rebuild_account_list()
-            self._notify_save()
+            # ISSUE-ARC-02：拖拽排序经 account_updated 事件触发落盘
+            self._event_bus.publish(
+                EVENT_ACCOUNT_UPDATED,
+                payload={"action": "reorder"},
+                source="main_window",
+            )
 
     def _on_add_account(self):
         default_label = f"Account {len(self._config.accounts) + 1}"
@@ -372,7 +397,12 @@ class MainWindow(ctk.CTk):
         if result:
             self._config.accounts.append(result)
             self._rebuild_account_list()
-            self._notify_save()
+            # ISSUE-ARC-02：账户变更经事件总线广播，App 订阅后统一落盘
+            self._event_bus.publish(
+                EVENT_ACCOUNT_ADDED,
+                payload={"uid": result.uid, "label": result.label},
+                source="main_window",
+            )
 
     def _on_edit_account(self, uid: str):
         idx = next((i for i, a in enumerate(self._config.accounts) if a.uid == uid), None)
@@ -390,7 +420,11 @@ class MainWindow(ctk.CTk):
             result.uid = uid
             self._config.accounts[idx] = result
             self._rebuild_account_list()
-            self._notify_save()
+            self._event_bus.publish(
+                EVENT_ACCOUNT_UPDATED,
+                payload={"uid": uid, "label": result.label},
+                source="main_window",
+            )
 
     def _highlight_account(self, uid: str):
         for row in self._account_rows:
@@ -404,11 +438,15 @@ class MainWindow(ctk.CTk):
             return
         del self._config.accounts[idx]
         self._rebuild_account_list()
-        self._notify_save()
+        self._event_bus.publish(
+            EVENT_ACCOUNT_DELETED,
+            payload={"uid": uid},
+            source="main_window",
+        )
 
     def _on_manual_refresh(self):
-        if self._schedule_callback:
-            self._schedule_callback()
+        # ISSUE-ARC-02：刷新请求经事件总线广播，App 按 _loaded 状态门分派
+        self._event_bus.publish(EVENT_REFRESH_REQUESTED, source="main_window")
 
     def _on_minimize_to_floating(self):
         self.withdraw()
@@ -432,28 +470,12 @@ class MainWindow(ctk.CTk):
                 row.update_balance(result)
                 return
 
-    def set_refresh_callback(self, callback: Callable):
-        self._schedule_callback = callback
-
-    def set_settings_callback(self, callback: Callable):
-        self._settings_callback = callback
-
-    def set_autostart_callback(self, callback: Callable):
-        self._autostart_callback = callback
-
-    def set_save_callback(self, callback: Callable):
-        self._save_callback = callback
-
-    def set_view_curve_callback(self, callback: Callable):
-        self._on_view_curve_callback = callback
-        for row in self._account_rows:
-            row._on_view_curve = callback
-
-    def set_view_usage_callback(self, callback: Callable):
-        self._on_view_usage_callback = callback
-
     def set_proxy_token_provider(self, provider: Callable[[], str]):
-        """ISSUE-SEC-04：注入代理 token 提供者，用于设置面板展示 token hash。"""
+        """ISSUE-SEC-04：注入代理 token 提供者，用于设置面板展示 token hash。
+
+        ISSUE-ARC-02：保留为同步查询接口而非事件——取 token 是"问一个值"，
+        不是"通知一件事"，改事件反而不匹配语义。
+        """
         self._proxy_token_provider = provider
 
     def set_status(self, text: str):
@@ -487,17 +509,26 @@ class MainWindow(ctk.CTk):
             self._config.settings.proxy_target = proxy_target
             AnimationHelper.set_ripple_color(ripple_color)
             self._update_interval_label()
-            if self._settings_callback:
-                self._settings_callback(interval)
-            if self._autostart_callback:
-                self._autostart_callback(autostart)
             if self._on_apply_theme:
                 self._on_apply_theme(theme)
-            self._notify_save()
+            # ISSUE-ARC-02：设置变更整体经 settings_changed 事件广播，
+            # App 订阅后统一分派（调度器间隔/自启/落盘），替代原 3 个回调链
+            self._event_bus.publish(
+                EVENT_SETTINGS_CHANGED,
+                payload={
+                    "interval": interval,
+                    "autostart": autostart,
+                    "theme": theme,
+                    "ripple_color": ripple_color,
+                    "proxy_target": proxy_target,
+                },
+                source="main_window",
+            )
 
     def _on_view_usage(self):
-        if self._on_view_usage_callback:
-            self._on_view_usage_callback()
+        # ISSUE-ARC-02：原 set_view_usage_callback 改为构造注入
+        if self._on_view_usage:
+            self._on_view_usage()
 
     def _update_interval_label(self):
         sec = self._config.settings.interval_sec
@@ -505,7 +536,3 @@ class MainWindow(ctk.CTk):
             self.interval_label.configure(text=f"刷新间隔: {sec // 60}分钟")
         else:
             self.interval_label.configure(text=f"刷新间隔: {sec}秒")
-
-    def _notify_save(self):
-        if self._save_callback:
-            self._save_callback()
