@@ -47,7 +47,9 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           cd main/dist
-          zip -qry ../${{ matrix.artifact_name }}.zip DeepSeekBalanceMonitor
+          # ISSUE-PKG-03：zip 必须落在 dist/ 内（曾误写 ../ 让包落到 main/，
+          # 上传步骤在 dist/ 找不到文件；softprops 对空匹配静默跳过，掩盖至今）
+          zip -qry ${{ matrix.artifact_name }}.zip DeepSeekBalanceMonitor
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
