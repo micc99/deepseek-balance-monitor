@@ -33,6 +33,7 @@ from floating_window import FloatingWindow
 from instance_lock import InstanceLock
 from animations import AnimationHelper
 from balance_checker import BalanceStatus
+from theme_manager import ThemeManager
 from usage_history import UsageHistory
 from usage_proxy import UsageProxy
 # ISSUE-ARC-05：纯逻辑函数抽离到独立模块，便于无 GUI 环境单元测试
@@ -99,6 +100,8 @@ def _is_autostart_enabled() -> bool:
 
 
 ICON_PATH = _get_resource_path(os.path.join("assets", "icon.png"))
+# ISSUE-THM-02：内置莫奈主题目录（打包需加入 PyInstaller datas，Phase C ISSUE-MIG-02 落实）
+BUILTIN_THEMES_DIR = _get_resource_path("themes")
 
 
 def _format_time(ts: float) -> str:
@@ -135,13 +138,15 @@ class App:
 
         # ISSUE-ARC-02：应用级事件总线，App 与各窗口/子系统解耦的中枢
         self.event_bus = EventBus()
+        # ISSUE-THM-01：主题管理器（App 持有唯一实例并注入依赖方）
+        self.theme_manager = ThemeManager(event_bus=self.event_bus)
 
         # ISSUE-PFM-02：先用空 AppConfig 创建 MainWindow，磁盘 IO 延迟到后台线程
         # 这样首屏渲染不等待 load_config / UsageHistory 建表 / UsageProxy 端口绑定
         self.config = AppConfig()
-        # 应用默认主题（实际主题在后台加载配置后由 _on_loaded 应用）
-        theme = self.config.settings.theme
-        ctk.set_appearance_mode(theme)
+        # 应用默认主题模式（实际主题在后台加载配置后由 _on_loaded 应用）
+        # ISSUE-THM-02：外观模式取 theme_mode（亮/暗），主题身份在 settings.theme
+        ctk.set_appearance_mode(self.config.settings.theme_mode)
         AnimationHelper.set_ripple_color(self.config.settings.ripple_color)
 
         # 后台线程加载完成后填充的子系统（首屏时为 None）
@@ -283,6 +288,9 @@ class App:
             set_level(loaded_config.settings.log_level)
             logger.info("应用启动，版本 %s，日志级别 %s", __version__, loaded_config.settings.log_level)
 
+            # 1.5 ISSUE-THM-02：加载内置莫奈主题（3 个小 JSON，随包分发）
+            self.theme_manager.load_directory(BUILTIN_THEMES_DIR)
+
             # 2. 创建 UsageHistory（SQLite 建表，磁盘 IO）
             self._usage_history = UsageHistory()
 
@@ -334,10 +342,10 @@ class App:
         # ISSUE-SEC-04：注入 token 提供者，供设置面板展示 token hash
         self.main_window.set_proxy_token_provider(self._usage_proxy.get_proxy_token)
 
-        # 应用配置中的主题
-        theme = self.config.settings.theme
-        ctk.set_appearance_mode(theme)
+        # 应用配置中的主题（ISSUE-THM-02：外观模式 theme_mode，身份 theme 同步给 ThemeManager）
+        ctk.set_appearance_mode(self.config.settings.theme_mode)
         AnimationHelper.set_ripple_color(self.config.settings.ripple_color)
+        self.theme_manager.apply(self.config.settings.theme, mode=self.config.settings.theme_mode)
 
         # 更新状态栏显示代理 URL
         proxy_info = f"代理: {self._proxy_url}" if self._proxy_url else "就绪"
@@ -354,9 +362,17 @@ class App:
             self.main_window.set_status(f"加载失败: {self._load_error}")
             logger.error("应用启动加载失败，UI 显示错误状态：%s", self._load_error)
 
-    def _apply_theme(self, theme: str):
-        ctk.set_appearance_mode(theme)
-        self.config.settings.theme = theme
+    def _apply_theme(self, mode: str):
+        """应用主题变更（设置对话框触发）。
+
+        ISSUE-THM-02：对话框在 Phase D 前返回 dark/light，这是亮暗模式而非主题身份，
+        写入 theme_mode；主题身份 settings.theme 不再被旧值覆盖。
+        ThemeManager 同步状态并广播 theme_changed（Phase D 前无订阅方，仅状态记录）。
+        """
+        ctk.set_appearance_mode(mode)
+        self.config.settings.theme_mode = mode
+        if self.theme_manager is not None:
+            self.theme_manager.apply(self.config.settings.theme, mode=mode)
         save_config(self.config)
 
     def _on_balance_result(self, result: BalanceResult):

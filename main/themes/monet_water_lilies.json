@@ -1,0 +1,32 @@
+{
+  "name": "monet_water_lilies",
+  "label": "莫奈·睡莲",
+  "description": "Water Lilies——睡莲蓝为基调的主推主题（PRD 7.1.3）",
+  "ripple_color": "#5B8AA6",
+  "light": {
+    "background": "#F5F0E8",
+    "surface": "#FFFFFF",
+    "primary": "#5B8AA6",
+    "secondary": "#9CAF88",
+    "accent": "#C8A2C8",
+    "text": "#2C3E50",
+    "text_muted": "#7F8C8D",
+    "border": "#DCD5C6",
+    "success": "#5E8C61",
+    "warning": "#C9A227",
+    "danger": "#B85C5C"
+  },
+  "dark": {
+    "background": "#1A1F2E",
+    "surface": "#242B3D",
+    "primary": "#7BA9C4",
+    "secondary": "#B5C9A3",
+    "accent": "#D4B5D4",
+    "text": "#E8E4D9",
+    "text_muted": "#A8B0B5",
+    "border": "#39415A",
+    "success": "#8FBF8A",
+    "warning": "#E0C368",
+    "danger": "#D98A8A"
+  }
+}

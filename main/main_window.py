@@ -495,22 +495,24 @@ class MainWindow(ctk.CTk):
             self,
             self._config.settings.interval_sec,
             self._config.settings.autostart,
-            self._config.settings.theme,
+            self._config.settings.theme_mode,
             self._config.settings.ripple_color,
             self._config.settings.proxy_target,
             proxy_token_display=proxy_token_display,
         )
         if result is not None:
-            interval, autostart, theme, ripple_color, proxy_target = result
+            interval, autostart, mode, ripple_color, proxy_target = result
             self._config.settings.interval_sec = interval
             self._config.settings.autostart = autostart
-            self._config.settings.theme = theme
+            # ISSUE-THM-02：对话框返回的是亮暗模式（dark/light），写入 theme_mode；
+            # 主题身份 settings.theme 由 ThemeManager/Phase D 编辑器管理
+            self._config.settings.theme_mode = mode
             self._config.settings.ripple_color = ripple_color
             self._config.settings.proxy_target = proxy_target
             AnimationHelper.set_ripple_color(ripple_color)
             self._update_interval_label()
             if self._on_apply_theme:
-                self._on_apply_theme(theme)
+                self._on_apply_theme(mode)
             # ISSUE-ARC-02：设置变更整体经 settings_changed 事件广播，
             # App 订阅后统一分派（调度器间隔/自启/落盘），替代原 3 个回调链
             self._event_bus.publish(
@@ -518,7 +520,7 @@ class MainWindow(ctk.CTk):
                 payload={
                     "interval": interval,
                     "autostart": autostart,
-                    "theme": theme,
+                    "theme_mode": mode,
                     "ripple_color": ripple_color,
                     "proxy_target": proxy_target,
                 },

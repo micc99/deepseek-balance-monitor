@@ -1,0 +1,32 @@
+{
+  "name": "monet_sunrise",
+  "label": "莫奈·日出印象",
+  "description": "Impression, Sunrise——日出橙与海面蓝（PRD 7.1.3）",
+  "ripple_color": "#E07B39",
+  "light": {
+    "background": "#FFF5EB",
+    "surface": "#FFFFFF",
+    "primary": "#E07B39",
+    "secondary": "#4A6FA5",
+    "accent": "#F2C849",
+    "text": "#3D2E1F",
+    "text_muted": "#8A7A6A",
+    "border": "#EADCCB",
+    "success": "#5E8C61",
+    "warning": "#C9A227",
+    "danger": "#B85C5C"
+  },
+  "dark": {
+    "background": "#1E1A14",
+    "surface": "#2A2419",
+    "primary": "#F09A5C",
+    "secondary": "#6B8DC4",
+    "accent": "#FFD96E",
+    "text": "#F5E6D3",
+    "text_muted": "#B8A895",
+    "border": "#3D3529",
+    "success": "#8FBF8A",
+    "warning": "#E0C368",
+    "danger": "#D98A8A"
+  }
+}

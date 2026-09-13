@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 
 from event_bus import EventBus, EVENT_THEME_CHANGED
@@ -121,6 +122,33 @@ class ThemeManager:
             )
         logger.info("主题已应用: name=%s label=%s mode=%s", name, theme.label, effective_mode)
         return True
+
+    # ---- 目录加载（THM-02 内置主题 / THM-03 用户主题目录共用）----
+
+    def load_directory(self, path: str, replace: bool = True) -> list[str]:
+        """扫描目录下全部 *.json 主题并注册，返回成功加载的主题名列表。
+
+        - 主题名以 JSON 内 name 字段为准，与文件名无关
+        - 同名主题默认覆盖（replace=False 时保留先注册者；
+          用户目录后加载，天然实现"用户主题同名覆盖内置"）
+        - 单个文件解析/读取失败：WARN 跳过，不影响其他主题（THM-03 AC4 降级）
+        - 目录不存在：静默返回空列表（用户主题目录首次运行时尚未创建）
+        """
+        loaded: list[str] = []
+        if not path or not os.path.isdir(path):
+            return loaded
+        for fname in sorted(os.listdir(path)):
+            if not fname.lower().endswith(".json"):
+                continue
+            fpath = os.path.join(path, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    theme = Theme.from_dict(json.load(f))
+                self.register(theme, replace=replace)
+                loaded.append(theme.name)
+            except (ValueError, json.JSONDecodeError, OSError) as e:
+                logger.warning("主题文件加载失败已跳过: %s (%s)", fpath, e)
+        return loaded
 
     # ---- 导入 / 导出（THM-03 用户主题文件、THM-04 编辑器共用）----
 

@@ -83,7 +83,10 @@ class WindowConfig:
 @dataclass
 class SettingsConfig:
     interval_sec: int = 60
-    theme: str = "dark"
+    # ISSUE-THM-02：theme 存主题身份（themes/*.json 的 name 字段），
+    # 亮/暗由 theme_mode 表达；旧配置的 theme:"dark"/"light" 在 load_config 运行时映射
+    theme: str = "monet_water_lilies"
+    theme_mode: str = "dark"  # 亮/暗模式："light" / "dark"（theme_models.MODE_* 值）
     autostart: bool = True
     ripple_color: str = "#aaddff"
     proxy_target: str = "api.deepseek.com"  # 代理转发目标，改为其他 provider 域名即可记录其用量
@@ -132,9 +135,21 @@ def load_config() -> AppConfig:
     w = data.get("window", {})
     window = WindowConfig(x=w.get("x"), y=w.get("y"))
     s = data.get("settings", {})
+    # ISSUE-THM-02：旧主题字段运行时兼容映射（无需版本迁移机制）。
+    # 旧 theme 值 "dark"/"light" 表达的是亮暗模式 → 映射为莫奈·睡莲（对应变体）；
+    # 新格式 theme=主题身份 + theme_mode=亮暗，直接透传。
+    legacy_theme = s.get("theme", "")
+    if legacy_theme in ("dark", "light"):
+        theme_name = "monet_water_lilies"
+        theme_mode = legacy_theme
+        logger.info("检测到旧版主题配置 theme=%s，映射为莫奈·睡莲（%s 变体）", legacy_theme, legacy_theme)
+    else:
+        theme_name = legacy_theme or "monet_water_lilies"
+        theme_mode = s.get("theme_mode", "dark")
     settings = SettingsConfig(
         interval_sec=s.get("interval_sec", 60),
-        theme=s.get("theme", "dark"),
+        theme=theme_name,
+        theme_mode=theme_mode,
         autostart=s.get("autostart", True),
         ripple_color=s.get("ripple_color", "#aaddff"),
         proxy_target=s.get("proxy_target", "api.deepseek.com"),
