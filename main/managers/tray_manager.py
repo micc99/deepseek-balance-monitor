@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+
+logger = logging.getLogger(__name__)
 
 
 """系统托盘管理（Qt 版，ISSUE-MIG-06）。
@@ -25,12 +28,14 @@ class TrayManager:
         self._icon: QSystemTrayIcon | None = None
 
     def start(self) -> None:
-        """创建托盘图标；图标文件缺失/不可用时静默降级。"""
+        """创建托盘图标；图标缺失/不可用时降级停用，但必须留下告警（ISSUE-BUG-05 Fail Loud）。"""
         try:
             if not os.path.exists(self._icon_path):
+                logger.warning("托盘图标文件缺失，托盘已停用：%s", self._icon_path)
                 return
             icon = QIcon(self._icon_path)
             if icon.isNull():
+                logger.warning("托盘图标文件无法加载，托盘已停用：%s", self._icon_path)
                 return
 
             menu = QMenu()

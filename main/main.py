@@ -53,7 +53,19 @@ def _get_resource_path(relative_path: str) -> str:
     return os.path.join(base_path, relative_path)
 
 
-ICON_PATH = _get_resource_path(os.path.join("assets", "icon.png"))
+# ISSUE-BUG-05：assets 在仓库根而非 main/，_get_resource_path（以 main.py 所在
+# 目录为基准，供 main/themes 等使用）解析出的 main/assets/icon.png 不存在，
+# 托盘图标自目录重组起从未显示（v1.9.3 同病）。assets 单独按仓库根解析；
+# frozen 场景 assets 由 CI --add-data "../assets/icon.png" 打入 _MEIPASS/assets。
+def _get_asset_path(relative_path: str) -> str:
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
+
+
+ICON_PATH = _get_asset_path(os.path.join("assets", "icon.png"))
 # ISSUE-THM-02：内置莫奈主题目录（ISSUE-MIG-08 打包加入 PyInstaller datas）
 BUILTIN_THEMES_DIR = _get_resource_path("themes")
 

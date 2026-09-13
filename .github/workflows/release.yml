@@ -38,7 +38,7 @@ jobs:
       - name: Build executable (onedir, PySide6)
         run: |
           cd main
-          pyinstaller --onedir --windowed --name "DeepSeekBalanceMonitor" ${{ matrix.icon_args }} --add-data "themes${{ matrix.sep }}themes" main.py
+          pyinstaller --onedir --windowed --name "DeepSeekBalanceMonitor" ${{ matrix.icon_args }} --add-data "themes${{ matrix.sep }}themes" --add-data "../assets/icon.png${{ matrix.sep }}assets" main.py
       - name: Package artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
