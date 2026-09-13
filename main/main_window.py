@@ -8,20 +8,27 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from config import AppConfig
-from event_bus import EventBus, EVENT_REFRESH_REQUESTED
+from event_bus import (
+    EventBus,
+    EVENT_REFRESH_REQUESTED,
+    EVENT_ACCOUNT_DELETED,
+    EVENT_ACCOUNT_UPDATED,
+)
 from qt_bridge import CallDispatcher
+from account_row import AccountRow
 
 
 class _Partial:
-    """轻量偏函数：保存 (fn, args)，调用时解包（避免 functools 依赖语义差异）。"""
+    """轻量偏函数：保存 (fn, args)，调用时解包（tkinter after *args 语义）。"""
 
     __slots__ = ("_fn", "_args")
 
@@ -33,7 +40,10 @@ class _Partial:
         self._fn(*self._args)
 
 
-"""主窗口（Qt 版，ISSUE-MIG-02 脚手架壳体 → ISSUE-MIG-03 完整账户列表）。
+"""主窗口（Qt 版，ISSUE-MIG-03 完整实装）。
+
+功能：账户列表（QListWidget 原生拖拽排序替代 ctk 手写拖拽）、余额实时
+更新、添加/编辑/删除（添加/编辑对话框随 ISSUE-MIG-05 接线）、设置入口。
 
 Stack 兼容面：WindowManager（ISSUE-ARC-01）以 after/winfo_exists/state/
 deiconify/lift/focus/prepare_exit/set_status/start_focus_monitor 等方法
@@ -67,6 +77,9 @@ class MainWindow(QMainWindow):
         self._close_hides = True  # ISSUE-LOG-03 语义：点关闭 = 切悬浮窗；prepare_exit 后真退出
         self._destroyed = False
         self.destroyed.connect(self._on_destroyed)
+        self._account_rows: list = []
+        self._drag_active = False
+        self._drag_source_idx: Optional[int] = None
 
         self.setWindowTitle("DeepSeek 余额监控")
         self.resize(700, 500)
@@ -85,6 +98,8 @@ class MainWindow(QMainWindow):
         # 快捷键（与 ctk 版 bind_all 等价）
         QShortcut(QKeySequence("Ctrl+R"), self, activated=self._on_manual_refresh)
         QShortcut(QKeySequence("Ctrl+Shift+B"), self, activated=self._on_minimize_to_floating)
+
+        self._rebuild_account_list()
 
     # ---- UI 构建 ----
 
@@ -110,15 +125,27 @@ class MainWindow(QMainWindow):
         return header
 
     def _build_list_area(self) -> QWidget:
-        self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(True)
-        placeholder = QWidget()
-        ph_layout = QVBoxLayout(placeholder)
-        ph_layout.setAlignment(Qt.AlignCenter)
-        empty = QLabel("账户列表（ISSUE-MIG-03 实装）", objectName="muted")
-        ph_layout.addWidget(empty)
-        self._scroll.setWidget(placeholder)
-        return self._scroll
+        self._list = QListWidget()
+        self._list.setObjectName("accountList")
+        self._list.setDragDropMode(QListWidget.InternalMove)
+        self._list.setSelectionMode(QListWidget.NoSelection)
+        self._list.setSpacing(2)
+        self._list.setStyleSheet(
+            "QListWidget{background:transparent;border:none;}"
+            "QListWidget::item{margin:0;}")
+        # 原生拖拽排序完成后，把新顺序写回 config 并广播（ISSUE-ARC-02）
+        self._list.model().rowsMoved.connect(self._on_rows_moved)
+
+        self._empty_label = QLabel("暂无监控账号\n点击「+ 添加账号」开始", objectName="muted")
+        self._empty_label.setAlignment(Qt.AlignCenter)
+
+        wrapper = QWidget()
+        w_layout = QVBoxLayout(wrapper)
+        w_layout.setContentsMargins(0, 0, 0, 0)
+        w_layout.addWidget(self._list)
+        w_layout.addWidget(self._empty_label)
+        self._empty_label.setVisible(False)
+        return wrapper
 
     def _build_footer(self) -> QWidget:
         footer = QFrame(objectName="card")
@@ -127,12 +154,85 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("就绪", objectName="status")
         self.interval_label = QLabel("", objectName="status")
         usage_btn = QPushButton("用量概览", objectName="flat")
-        usage_btn.clicked.connect(self._on_view_usage if self._on_view_usage else lambda: None)
+        usage_btn.clicked.connect(self._safe_view_usage)
         row.addWidget(self.status_label)
         row.addStretch(1)
         row.addWidget(self.interval_label)
         row.addWidget(usage_btn)
+        self._update_interval_label()
         return footer
+
+    # ---- 账户列表（ISSUE-MIG-03）----
+
+    def _rebuild_account_list(self):
+        """销毁所有 AccountRow 并从 config 重建，拖拽排序后也会调用。"""
+        self._list.clear()
+        self._account_rows.clear()
+        if not self._config.accounts:
+            self._empty_label.setVisible(True)
+            self._list.setVisible(False)
+            return
+        self._empty_label.setVisible(False)
+        self._list.setVisible(True)
+        for acc in self._config.accounts:
+            row = AccountRow(
+                self._list,
+                acc.uid,
+                acc,
+                on_edit=self._on_edit_account,
+                on_delete=self._on_delete_account,
+                on_view_curve=self._on_view_curve,
+            )
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, acc.uid)
+            item.setSizeHint(row.sizeHint())
+            self._list.addItem(item)
+            self._list.setItemWidget(item, row)
+            self._account_rows.append(row)
+
+    def _on_rows_moved(self, *args):
+        """原生拖拽落点：按列表新顺序重排 config.accounts 并广播落盘。"""
+        order = [self._list.item(i).data(Qt.UserRole) for i in range(self._list.count())]
+        by_uid = {a.uid: a for a in self._config.accounts}
+        if set(order) != set(by_uid):
+            self._rebuild_account_list()  # 异常状态兜底：按 config 还原
+            return
+        self._config.accounts[:] = [by_uid[u] for u in order]
+        self._event_bus.publish(
+            EVENT_ACCOUNT_UPDATED,
+            payload={"action": "reorder"},
+            source="main_window",
+        )
+
+    def _on_add_account(self):
+        # ISSUE-MIG-05：EditAccountDialog Qt 化后接线
+        pass
+
+    def _on_edit_account(self, uid: str):
+        # ISSUE-MIG-05：EditAccountDialog Qt 化后接线
+        pass
+
+    def _on_delete_account(self, uid: str):
+        idx = next((i for i, a in enumerate(self._config.accounts) if a.uid == uid), None)
+        if idx is None:
+            return
+        del self._config.accounts[idx]
+        self._rebuild_account_list()
+        self._event_bus.publish(
+            EVENT_ACCOUNT_DELETED,
+            payload={"uid": uid},
+            source="main_window",
+        )
+
+    def _highlight_account(self, uid: str):
+        for row in self._account_rows:
+            if row.uid == uid:
+                row.highlight()
+                break
+
+    def _safe_view_usage(self):
+        if self._on_view_usage:
+            self._on_view_usage()
 
     # ---- 动作 ----
 
@@ -144,6 +244,17 @@ class MainWindow(QMainWindow):
         self.hide()
         if self._on_switch_to_floating:
             self._on_switch_to_floating()
+
+    def _update_interval_label(self):
+        sec = self._config.settings.interval_sec
+        if sec >= 60:
+            self.interval_label.setText(f"刷新间隔: {sec // 60}分钟")
+        else:
+            self.interval_label.setText(f"刷新间隔: {sec}秒")
+
+    def _on_settings(self):
+        # ISSUE-MIG-05：SettingsDialog Qt 化后接线
+        pass
 
     # ---- WindowManager 兼容面（双栈同名 API）----
 
@@ -199,12 +310,9 @@ class MainWindow(QMainWindow):
         """ISSUE-SEC-04：同步查询接口（ARC-02 决策：查询非事件）。"""
         self._proxy_token_provider = provider
 
-    def _rebuild_account_list(self):
-        """ISSUE-MIG-03：账户列表重建（壳体阶段占位，随 MIG-03 实装）。"""
-
     def update_account_balance(self, result):
-        """ISSUE-MIG-03：账户行余额刷新（壳体阶段无行可更新）。"""
-        for row in getattr(self, "_account_rows", []):
+        """余额结果分发到对应账户行。"""
+        for row in self._account_rows:
             if row.uid == result.uid:
                 row.update_balance(result)
                 return

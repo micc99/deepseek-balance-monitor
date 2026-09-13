@@ -10,9 +10,25 @@ setStyleSheet 全局生效；theme_changed 事件触发重生成即全窗重着�
 D6 决策：波纹动画移除，以 QSS hover 过渡替代。
 """
 
+_current_layer: ThemeLayer | None = None
+
+
+def current_layer() -> ThemeLayer | None:
+    """最近一次渲染的语义色层（行内动态配色的查询入口）。"""
+    return _current_layer
+
+
+def current_hover() -> str:
+    """行内 hover 高亮色（未渲染过时给中性灰）。"""
+    if _current_layer is not None:
+        return _current_layer.border
+    return "rgba(128,128,128,60)"
+
 
 def build_qss(layer: ThemeLayer) -> str:
     """由语义色层生成全局样式表。"""
+    global _current_layer
+    _current_layer = layer
     return f"""
 * {{
     background-color: {layer.background};
