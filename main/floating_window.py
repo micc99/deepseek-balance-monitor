@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QLabel, QMenu, QVBoxLayout, QWidget
 
 from config import WindowConfig
@@ -22,7 +23,10 @@ class FloatingWindow(QWidget):
     """紧凑型悬浮窗：标题 + 余额摘要 + 状态栏。"""
 
     def __init__(self, on_restore: Callable = None, on_refresh: Callable = None, on_exit: Callable = None):
+        # ISSUE-BUG-01：PySide6 QWidget 首位参数是 parent，flags 必须带 None 占位传入
+        # （tkinter→Qt 迁移差异：原写法 super().__init__(flags) 抛 TypeError 即"闪退"）
         super().__init__(
+            None,
             Qt.Tool  # 不在任务栏出现
             | Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint
@@ -75,6 +79,10 @@ class FloatingWindow(QWidget):
             self._on_restore()
 
     def contextMenuEvent(self, event):
+        self._build_context_menu().exec(event.globalPos())
+
+    def _build_context_menu(self) -> QMenu:
+        """构建右键菜单（独立方法便于测试：ISSUE-BUG-01 回归）。"""
         menu = QMenu(self)
         if self._on_refresh:
             act_refresh = QAction("立即刷新", menu)
@@ -84,7 +92,7 @@ class FloatingWindow(QWidget):
         act_exit = QAction("退出", menu)
         act_exit.triggered.connect(self._on_exit)
         menu.addAction(act_exit)
-        menu.exec(event.globalPos())
+        return menu
 
     def _on_exit(self):
         if self._on_exit_cb:

@@ -155,6 +155,9 @@ class WindowManager:
         self.floating_window.protocol("WM_DELETE_WINDOW", self._on_floating_close)
         # 原 _init_floating_position：恢复上次悬浮窗位置
         self.floating_window.set_position(self._config_provider().window)
+        # ISSUE-BUG-01：Qt 顶层窗需显式显示（tkinter Toplevel 创建即显示的语义差异），
+        # 与复用分支 deiconify 语义一致；先显示再刷新，刷新异常不拖累可见性
+        self.floating_window.deiconify()
         self.refresh_floating()
 
     def _on_floating_close(self) -> None:
@@ -218,7 +221,7 @@ class WindowManager:
             return
         if self._main_alive():
             from usage_curve_window import BalanceCurveWindow
-            BalanceCurveWindow(
+            win = BalanceCurveWindow(
                 self.main_window,
                 account_label=account.label,
                 api_key=account.api_key,
@@ -226,6 +229,7 @@ class WindowManager:
                 history=self._get_history(),
                 event_bus=self._event_bus,
             )
+            self._present_chart_window(win)  # ISSUE-BUG-02
 
     def open_usage_window(self) -> None:
         """打开用量概览（原 App._on_view_usage）。"""
@@ -234,12 +238,20 @@ class WindowManager:
             return
         if self._main_alive():
             from usage_bar_window import UsageBarWindow
-            UsageBarWindow(
+            win = UsageBarWindow(
                 self.main_window,
                 history=self._get_history(),
                 accounts=self._config_provider().accounts,
                 event_bus=self._event_bus,
             )
+            self._present_chart_window(win)  # ISSUE-BUG-02
+
+    @staticmethod
+    def _present_chart_window(win) -> None:
+        """ISSUE-BUG-02：Qt 顶层窗创建后必须显式显示（tkinter Toplevel 创建即显示）。"""
+        win.show()
+        win.raise_()
+        win.activateWindow()
 
     # ---- 退出 ----
 

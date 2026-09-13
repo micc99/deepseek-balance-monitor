@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from usage_history import UsageHistory
@@ -59,7 +60,7 @@ class UsageBarWindow(QWidget):
     """用量概览窗口：分组柱状图展示各账户在今日/本周/本月的消耗金额。"""
 
     def __init__(self, parent, history: UsageHistory, accounts: list, event_bus=None):
-        super().__init__(parent, Qt_Window())
+        super().__init__(parent, Qt.Window)  # ISSUE-BUG-02：规范 flags 写法（原 Qt_Window() helper）
         self.setWindowTitle("用量概览")
         self.resize(700, 520)
         self.setMinimumSize(550, 400)
@@ -82,12 +83,10 @@ class UsageBarWindow(QWidget):
         # ISSUE-THM-05：订阅主题变更，打开状态下实时重着色
         self._unsubscribe_theme = None
         if event_bus is not None:
-            from PySide6.QtCore import QTimer
             self._unsubscribe_theme = event_bus.subscribe(
                 "theme_changed", lambda _e: QTimer.singleShot(0, self._render))
             self.destroyed.connect(lambda: self._unsubscribe_theme and self._unsubscribe_theme())
 
-        from PySide6.QtCore import QTimer
         QTimer.singleShot(50, self._render)
 
     def _render(self):
@@ -151,8 +150,3 @@ class UsageBarWindow(QWidget):
             note = pg.TextItem("暂无消耗记录\n余额未发生变更或无快照数据", color=tc["text"])
             note.setPos(len(labels) / 2, max(1.0, max((max(v) for v in series.values()), default=1.0)))
             self._plot.addItem(note)
-
-
-def Qt_Window():
-    from PySide6.QtCore import Qt
-    return Qt.Window

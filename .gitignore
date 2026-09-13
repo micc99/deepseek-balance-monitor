@@ -8,6 +8,8 @@
 
 # ===== 白名单目录内部仍需排除的隐私与临时文件（后写规则优先生效） =====
 config.json
+# ISSUE-CFG-02 原子写的滚动备份：与 config.json 同为密文材料，一律不入库
+config.json.bak.*
 
 # 测试目录：仅本地保留，不上传
 main/tests/
