@@ -110,7 +110,10 @@ class App:
             on_exit=self._quit,
             event_bus=self.event_bus,
         )
-        self.hotkeys.register_toggle(self.windows.toggle)
+        self.hotkeys.register_toggle(
+            self.windows.toggle,
+            self.config.settings.hotkeys.get("toggle_window", "<ctrl>+<shift>+b"),
+        )
 
     # ---- 启动流程 ----
 
@@ -160,6 +163,12 @@ class App:
             self.config.settings.interval_sec = max(10, interval)
             logger.info("配置尚未加载完成，间隔设置已暂存")
         self.autostart.set(bool(autostart))
+        # ISSUE-UX-02：全局热键重注册（配置可能已变更）
+        self.hotkeys.register_toggle(
+            self.windows.toggle,
+            payload.get("hotkeys", {}).get(
+                "toggle_window", self.config.settings.hotkeys.get("toggle_window", "<ctrl>+<shift>+b")),
+        )
         save_config(self.config)
 
     def _on_accounts_changed(self, event: Event):

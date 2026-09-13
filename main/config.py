@@ -93,6 +93,14 @@ class SettingsConfig:
     theme_mode: str = "dark"  # 亮/暗模式："light" / "dark"（theme_models.MODE_* 值）
     # ISSUE-THM-06：自定义主题种子色，theme=="custom" 时生效；仅存种子，不落 themes/ 目录
     custom_theme_seed: str = ""
+    # ISSUE-UX-02：可配置快捷键（pynput 修饰键格式 <ctrl>+<shift>+b）
+    hotkeys: dict = field(default_factory=lambda: {
+        "toggle_window": "<ctrl>+<shift>+b",
+        "manual_refresh": "<ctrl>+r",
+    })
+    # ISSUE-UX-04：失焦自动切悬浮窗。默认 True 保持 PFM-05 以来的现状行为
+    # （PRD 7.2 示例值 False 未采纳，避免升级后行为突变）
+    auto_float_on_focus_loss: bool = True
     autostart: bool = True
     ripple_color: str = "#aaddff"
     proxy_target: str = "api.deepseek.com"  # 代理转发目标，改为其他 provider 域名即可记录其用量
@@ -205,6 +213,11 @@ def load_config() -> AppConfig:
         theme=theme_name,
         theme_mode=theme_mode,
         custom_theme_seed=s.get("custom_theme_seed", ""),
+        hotkeys=s.get("hotkeys", {
+            "toggle_window": "<ctrl>+<shift>+b",
+            "manual_refresh": "<ctrl>+r",
+        }),
+        auto_float_on_focus_loss=s.get("auto_float_on_focus_loss", True),
         autostart=s.get("autostart", True),
         ripple_color=s.get("ripple_color", "#aaddff"),
         proxy_target=s.get("proxy_target", "api.deepseek.com"),

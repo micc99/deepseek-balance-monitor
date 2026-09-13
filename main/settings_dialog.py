@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
+    QKeySequenceEdit,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -53,9 +55,12 @@ class SettingsDialog(QDialog):
         ripple_color: str = "#aaddff",
         proxy_target: str = "api.deepseek.com",
         proxy_token_display: str = "",
+        hotkeys: dict | None = None,
+        auto_float_on_focus_loss: bool = True,
     ):
         super().__init__(parent)
         self.setWindowTitle("设置")
+        hotkeys = hotkeys or {}
         self.setFixedWidth(460)
         self.setModal(True)
         self.result = None
@@ -107,6 +112,23 @@ class SettingsDialog(QDialog):
         root.addWidget(self._autostart_check)
         self._autostart_check.setChecked(autostart)
 
+        # ISSUE-UX-02：可配置快捷键
+        root.addWidget(QLabel("快捷键"))
+        hk_row = QHBoxLayout()
+        hk_row.addWidget(QLabel("切换悬浮窗"))
+        from managers.hotkey_manager import pynput_to_qt
+        self._toggle_edit = QKeySequenceEdit(QKeySequence(pynput_to_qt(hotkeys.get("toggle_window", ""))))
+        hk_row.addWidget(self._toggle_edit)
+        hk_row.addWidget(QLabel("手动刷新"))
+        self._refresh_edit = QKeySequenceEdit(QKeySequence(pynput_to_qt(hotkeys.get("manual_refresh", ""))))
+        hk_row.addWidget(self._refresh_edit)
+        root.addLayout(hk_row)
+
+        # ISSUE-UX-04：失焦行为开关
+        self._auto_float_check = QCheckBox("失焦后自动最小化到悬浮窗")
+        root.addWidget(self._auto_float_check)
+        self._auto_float_check.setChecked(auto_float_on_focus_loss)
+
         # 代理 token 展示（只读，便于用户排查客户端配置）
         if proxy_token_display:
             root.addWidget(QLabel("代理鉴权 Token（已脱敏）"))
@@ -133,12 +155,25 @@ class SettingsDialog(QDialog):
         theme = "dark" if self._theme_combo.currentText() == "暗黑模式" else "light"
         ripple_color = self.RIPPLE_COLORS.get(self._ripple_combo.currentText(), "#aaddff")
         proxy_target = self.PROXY_TARGETS.get(self._proxy_combo.currentText(), self._proxy_combo.currentText())
+        def _to_pynput(seq: QKeySequence) -> str:
+            """QKeySequence → pynput 修饰键格式（"Ctrl+Shift+B" → "<ctrl>+<shift>+b"）。"""
+            if seq.isEmpty():
+                return ""
+            parts = [seg.lower() for seg in seq.toString().split("+") if seg]
+            mod = {"ctrl", "shift", "alt", "meta", "win"}
+            return "+".join(f"<{p}>" if p in mod else p for p in parts)
+
         self.result = (
             max(10, val),
             self._autostart_check.isChecked(),
             theme,
             ripple_color,
             proxy_target,
+            {
+                "toggle_window": _to_pynput(self._toggle_edit.keySequence()) or "<ctrl>+<shift>+b",
+                "manual_refresh": _to_pynput(self._refresh_edit.keySequence()) or "<ctrl>+r",
+            },
+            self._auto_float_check.isChecked(),
         )
         self.accept()
 
@@ -152,6 +187,8 @@ class SettingsDialog(QDialog):
         ripple_color: str = "#aaddff",
         proxy_target: str = "api.deepseek.com",
         proxy_token_display: str = "",
+        hotkeys: dict | None = None,
+        auto_float_on_focus_loss: bool = True,
     ):
         dlg = cls(
             parent,
@@ -161,6 +198,8 @@ class SettingsDialog(QDialog):
             ripple_color,
             proxy_target,
             proxy_token_display,
+            hotkeys,
+            auto_float_on_focus_loss,
         )
         dlg.exec()
         return dlg.result

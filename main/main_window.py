@@ -28,6 +28,7 @@ from event_bus import (
     EVENT_ACCOUNT_DELETED,
     EVENT_ACCOUNT_UPDATED,
 )
+from managers.hotkey_manager import pynput_to_qt
 from qt_bridge import CallDispatcher
 from account_row import AccountRow
 
@@ -100,9 +101,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_list_area(), 1)
         layout.addWidget(self._build_footer())
 
-        # 快捷键（与 ctk 版 bind_all 等价）
-        QShortcut(QKeySequence("Ctrl+R"), self, activated=self._on_manual_refresh)
-        QShortcut(QKeySequence("Ctrl+Shift+B"), self, activated=self._on_minimize_to_floating)
+        # ISSUE-UX-02：快捷键来自 config（toggle_window 为全局 pynput 热键，
+        # manual_refresh 为窗口内 QShortcut；均可经设置对话框修改）
+        self._refresh_shortcut = QShortcut(
+            QKeySequence(pynput_to_qt(self._config.settings.hotkeys.get("manual_refresh", "<ctrl>+r"))),
+            self, activated=self._on_manual_refresh)
+        QShortcut(
+            QKeySequence(pynput_to_qt(self._config.settings.hotkeys.get("toggle_window", "<ctrl>+<shift>+b"))),
+            self, activated=self._on_minimize_to_floating)
 
         self._rebuild_account_list()
 
@@ -310,9 +316,11 @@ class MainWindow(QMainWindow):
             self._config.settings.ripple_color,
             self._config.settings.proxy_target,
             proxy_token_display=proxy_token_display,
+            hotkeys=self._config.settings.hotkeys,
+            auto_float_on_focus_loss=self._config.settings.auto_float_on_focus_loss,
         )
         if result is not None:
-            interval, autostart, mode, ripple_color, proxy_target = result
+            interval, autostart, mode, ripple_color, proxy_target, hotkeys, auto_float = result
             self._config.settings.interval_sec = interval
             self._config.settings.autostart = autostart
             # ISSUE-THM-02：对话框返回的是亮暗模式（dark/light），写入 theme_mode；
@@ -320,11 +328,13 @@ class MainWindow(QMainWindow):
             self._config.settings.theme_mode = mode
             self._config.settings.ripple_color = ripple_color
             self._config.settings.proxy_target = proxy_target
+            # ISSUE-UX-02/UX-04：快捷键与失焦行为写入配置，重绑窗口内快捷键
+            self._config.settings.hotkeys = hotkeys
+            self._config.settings.auto_float_on_focus_loss = auto_float
+            self.apply_hotkeys()
             self._update_interval_label()
-            if self._on_apply_theme:
-                self._on_apply_theme(mode)
             # ISSUE-ARC-02：设置变更整体经 settings_changed 事件广播，
-            # App 订阅后统一分派（调度器间隔/自启/落盘）
+            # App 订阅后统一分派（调度器间隔/自启/全局热键/落盘）
             self._event_bus.publish(
                 EVENT_SETTINGS_CHANGED,
                 payload={
@@ -333,6 +343,8 @@ class MainWindow(QMainWindow):
                     "theme_mode": mode,
                     "ripple_color": ripple_color,
                     "proxy_target": proxy_target,
+                    "hotkeys": hotkeys,
+                    "auto_float": auto_float,
                 },
                 source="main_window",
             )
@@ -422,8 +434,13 @@ class MainWindow(QMainWindow):
             self._focus_check_id.start()
 
     def _on_focus_loss_confirmed(self):
-        """ISSUE-PFM-05：300ms 防抖后确认焦点丢失，校验子对话框后切悬浮窗。"""
+        """ISSUE-PFM-05：300ms 防抖后确认焦点丢失，校验子对话框后切悬浮窗。
+
+        ISSUE-UX-04：auto_float_on_focus_loss=False 时不自动切换。
+        """
         if not self.winfo_exists() or not self.isVisible():
+            return
+        if not getattr(self._config.settings, "auto_float_on_focus_loss", True):
             return
         # 校验子对话框：有可见 QDialog 时不切（避免对话框抢焦点误判）
         from PySide6.QtWidgets import QDialog
@@ -433,6 +450,11 @@ class MainWindow(QMainWindow):
         self.hide()
         if self._on_switch_to_floating:
             self._on_switch_to_floating()
+
+    def apply_hotkeys(self):
+        """ISSUE-UX-02：设置变更后重绑窗口内快捷键。"""
+        hk = self._config.settings.hotkeys.get("manual_refresh", "<ctrl>+r")
+        self._refresh_shortcut.setKey(QKeySequence(pynput_to_qt(hk)))
 
     def set_proxy_token_provider(self, provider: Callable[[], str]):
         """ISSUE-SEC-04：同步查询接口（ARC-02 决策：查询非事件）。"""

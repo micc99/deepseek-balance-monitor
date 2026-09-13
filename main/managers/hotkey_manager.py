@@ -10,20 +10,36 @@ pynput GlobalHotKeys 在守护线程监听，回调经 WindowManager 的 after(0
 导入失败（无显示环境等）静默降级。UX-02 快捷键可配置化在 Phase D 接入。
 """
 
-_HOTKEY_TOGGLE = "<ctrl>+<shift>+b"
+DEFAULT_TOGGLE = "<ctrl>+<shift>+b"
+
+
+def pynput_to_qt(hotkey: str) -> str:
+    """pynput 修饰键格式转 QKeySequence 可解析格式。
+
+    "<ctrl>+<shift>+b" → "Ctrl+Shift+b"（QKeySequence 大小写不敏感，
+    单字母保留原样即可命中）。
+    """
+    parts = [seg.strip(" <>") for seg in (hotkey or "").split("+") if seg.strip()]
+    return "+".join(parts)
 
 
 class HotkeyManager:
-    """全局热键注册与注销。"""
+    """全局热键注册与注销（ISSUE-UX-02：热键来自 config.settings.hotkeys）。"""
 
     def __init__(self):
         self._listener = None
+        self._hotkey = None
+        self._callback = None
 
-    def register_toggle(self, callback) -> None:
-        """注册悬浮窗切换热键（Ctrl+Shift+B）；失败记录日志不崩溃。"""
+    def register_toggle(self, callback, hotkey: str = DEFAULT_TOGGLE) -> None:
+        """注册悬浮窗切换全局热键；失败记录日志不崩溃。重复注册先注销。"""
+        if self._listener is not None:
+            self.unregister()
+        self._callback = callback
+        self._hotkey = hotkey or DEFAULT_TOGGLE
         try:
             from pynput import keyboard
-            self._listener = keyboard.GlobalHotKeys({_HOTKEY_TOGGLE: callback})
+            self._listener = keyboard.GlobalHotKeys({self._hotkey: callback})
             self._listener.daemon = True
             self._listener.start()
         except Exception as e:
