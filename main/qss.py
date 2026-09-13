@@ -12,6 +12,13 @@ D6 决策：波纹动画移除，以 QSS hover 过渡替代。
 
 _current_layer: ThemeLayer | None = None
 
+# ISSUE-UX-06：语义状态色集中管理（行内动态配色统一从这里取，
+# 禁止 UI 模块各自硬编码十六进制色值）
+SEMANTIC_OK = "#4caf50"
+SEMANTIC_WARN = "#ff9800"
+SEMANTIC_ERR = "#f44336"
+SEMANTIC_DRAG_HIGHLIGHT = "#4a9eff"
+
 
 def current_layer() -> ThemeLayer | None:
     """最近一次渲染的语义色层（行内动态配色的查询入口）。"""

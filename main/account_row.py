@@ -21,10 +21,12 @@ D6 决策：波纹动画/闪烁动画不迁移，hover 反馈由 QSS 承担。
 """
 
 
-# 语义状态色（非主题 token，Phase D UX-06 统一收编）
-_OK_COLOR = "#4caf50"
-_WARN_COLOR = "#ff9800"
-_ERR_COLOR = "#f44336"
+# ISSUE-UX-06：语义状态色集中管理（qss.py）
+from qss import SEMANTIC_ERR, SEMANTIC_OK, SEMANTIC_WARN
+
+_OK_COLOR = SEMANTIC_OK
+_WARN_COLOR = SEMANTIC_WARN
+_ERR_COLOR = SEMANTIC_ERR
 
 
 class AccountRow(QFrame):

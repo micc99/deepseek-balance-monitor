@@ -108,6 +108,7 @@ class App:
             get_refresh_now=lambda: self.scheduler_manager.refresh_now if self.scheduler_manager else None,
             get_history=lambda: self._usage_history,
             on_exit=self._quit,
+            event_bus=self.event_bus,
         )
         self.hotkeys.register_toggle(self.windows.toggle)
 

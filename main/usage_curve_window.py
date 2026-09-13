@@ -56,11 +56,18 @@ def _theme_colors() -> dict:
 class BalanceCurveWindow(QWidget):
     """单账户余额趋势折线图，支持时间范围切换与 hover 取值。"""
 
-    def __init__(self, parent, account_label: str, api_key: str, uid: str, history: UsageHistory):
+    def __init__(self, parent, account_label: str, api_key: str, uid: str, history: UsageHistory,
+                 event_bus=None):
         super().__init__(parent, Qt.Window)
         self.setWindowTitle(f"余额趋势 — {account_label}")
         self.resize(750, 520)
         self.setMinimumSize(550, 400)
+        # ISSUE-THM-05：订阅主题变更，打开状态下实时重着色
+        self._unsubscribe_theme = None
+        if event_bus is not None:
+            self._unsubscribe_theme = event_bus.subscribe(
+                "theme_changed", lambda _e: QTimer_single(self._render))
+            self.destroyed.connect(lambda: self._unsubscribe_theme and self._unsubscribe_theme())
 
         self._api_key_hash = _hash_key(api_key)
         self._uid = uid
@@ -180,6 +187,10 @@ class BalanceCurveWindow(QWidget):
         return now - 86400, "24小时"
 
 
-def QTimer_start(widget, ms, fn):
+def QTimer_single(ms, fn):
     from PySide6.QtCore import QTimer
     QTimer.singleShot(ms, fn)
+
+
+def QTimer_start(widget, ms, fn):
+    QTimer_single(ms, fn)
