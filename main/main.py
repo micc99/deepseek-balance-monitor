@@ -59,29 +59,25 @@ BUILTIN_THEMES_DIR = _get_resource_path("themes")
 
 
 class App:
-    """应用编排器（ISSUE-ARC-01 / ISSUE-MIG-02 Qt 化）：实例化 Manager 并连接事件。
+    """应用编排器（ARC-01）：实例化 Manager 并连接事件，不含子系统实现。
 
-    职责归属：Lifecycle=锁+IPC / WindowManager=双窗+图表窗+余额UI /
-    ThemeCoordinator=主题→QSS / Tray·Hotkey·Autostart=托盘热键自启 /
-    SchedulerManager·ProxyManager=调度代理（后台加载后创建，PFM-02 门）。
+    Lifecycle=锁+IPC｜WindowManager=双窗/图表窗/余额UI｜ThemeCoordinator=主题→QSS｜
+    Tray·Hotkey·Autostart=托盘热键自启｜Scheduler·Proxy=调度代理（PFM-02 门）。
     """
 
     def __init__(self):
-        # 日志系统必须最先初始化
-        setup_logging(level="INFO", console=True)
+        setup_logging(level="INFO", console=True)  # 日志系统必须最先初始化
 
         self.lifecycle = LifecycleManager(LOCK_NAME, IPC_PORT)
         if not self.lifecycle.acquire():
             self.lifecycle.signal_show()
             sys.exit(0)
 
-        # QApplication 先于任何控件创建
-        self.qt_app = QApplication.instance() or QApplication(sys.argv)
+        self.qt_app = QApplication.instance() or QApplication(sys.argv)  # 先于任何控件
 
         self._exiting = False
-        # ISSUE-PFM-02：后台加载状态门——以下两者加载完成前为 None
-        self._loaded = False
-        self._load_error: str = ""
+        # ISSUE-PFM-02：后台加载状态门——以下四者加载完成前为 None
+        self._loaded, self._load_error = False, ""
         self.scheduler_manager: SchedulerManager | None = None
         self.proxy_manager: ProxyManager | None = None
         self._usage_history: UsageHistory | None = None
@@ -91,10 +87,7 @@ class App:
 
         # ISSUE-ARC-02：应用级事件总线
         self.event_bus = EventBus()
-        # ISSUE-ARC-06：Provider 注册表广播接线在 _background_init 中
-        # （set_provider_event_bus 所在模块链含 requests，随启动异步化推迟）
-        # ISSUE-THM-01/MIG-02：主题协调器（内置主题同步加载，保证首帧 QSS 正确；
-        # 三个小 JSON 约 1ms，不构成 PFM-02 延迟加载的对象——那是给建表/端口留的）
+        # ISSUE-THM-01/MIG-02：主题协调器（内置主题同步加载保证首帧 QSS；小 JSON 不属 PFM-02 延迟对象）
         self.theme = ThemeCoordinator(self.event_bus, self.qt_app)
         self.theme.load(BUILTIN_THEMES_DIR)
         self.theme.apply_startup(self.config)
@@ -110,22 +103,16 @@ class App:
             on_exit=self._quit,
             event_bus=self.event_bus,
         )
-        self.hotkeys.register_toggle(
-            self.windows.toggle,
-            self.config.settings.hotkeys.get("toggle_window", "<ctrl>+<shift>+b"),
-        )
-
-    # ---- 启动流程 ----
+        self.hotkeys.register_toggle(self.windows.toggle, self.config.settings.hotkeys.get("toggle_window", "<ctrl>+<shift>+b"))
 
     def run(self):
         self.windows.create_main_window(
             event_bus=self.event_bus,
             on_switch_to_floating=self.windows.show_floating,
-            on_apply_theme=lambda mode: self.theme.apply_mode(mode, self.config),
             on_view_curve=self.windows.open_curve_window,
             on_view_usage=self.windows.open_usage_window,
             version_title=f"DeepSeek 余额监控 v{__version__}",
-            on_open_theme_editor=self._open_theme_editor,
+            on_open_theme_editor=lambda: self.theme.open_editor(self.windows.main_window, self.event_bus),
         )
         self._wire_events()
         self.windows.set_status("正在加载配置...")
@@ -134,19 +121,18 @@ class App:
         # ISSUE-PFM-02：100ms 后后台加载（首屏先渲染）；500ms 后启动焦点监视
         self.windows.main_window.after(100, self._deferred_init)
         self.windows.main_window.after(500, self.windows.main_window.start_focus_monitor)
-        # ISSUE-PFM-07：启动完成标记，供 measure_startup_time.py 检测
-        print("__STARTUP_DONE__", flush=True)
+        print("__STARTUP_DONE__", flush=True)  # ISSUE-PFM-07：启动完成标记
         self.windows.main_window.show()
         self.qt_app.exec()
 
     def _wire_events(self):
         """ISSUE-ARC-02：订阅 MainWindow 事件，按 scheduler 就绪状态分派。"""
-        bus = self.event_bus
+        bus, save = self.event_bus, lambda e: save_config(self.config)
         bus.subscribe(EVENT_REFRESH_REQUESTED, self._on_refresh_requested)
         bus.subscribe(EVENT_SETTINGS_CHANGED, self._on_settings_changed)
-        bus.subscribe(EVENT_ACCOUNT_ADDED, self._on_accounts_changed)
-        bus.subscribe(EVENT_ACCOUNT_UPDATED, self._on_accounts_changed)
-        bus.subscribe(EVENT_ACCOUNT_DELETED, self._on_accounts_changed)
+        bus.subscribe(EVENT_ACCOUNT_ADDED, save)
+        bus.subscribe(EVENT_ACCOUNT_UPDATED, save)
+        bus.subscribe(EVENT_ACCOUNT_DELETED, save)
 
     def _on_refresh_requested(self, event: Event):
         if self.scheduler_manager is not None:
@@ -164,52 +150,21 @@ class App:
             self.config.settings.interval_sec = max(10, interval)
             logger.info("配置尚未加载完成，间隔设置已暂存")
         self.autostart.set(bool(autostart))
-        # ISSUE-THM-06：主题身份/种子变更经 ThemeCoordinator 完整应用
-        # （apply_startup 内部广播 theme_changed → QSS 全窗重着色）
-        if self.theme is not None:
-            self.theme.sync_config(self.config)
-            self.theme.apply_startup(self.config)
-        # ISSUE-UX-02：全局热键重注册（配置可能已变更）
-        self.hotkeys.register_toggle(
-            self.windows.toggle,
-            payload.get("hotkeys", {}).get(
-                "toggle_window", self.config.settings.hotkeys.get("toggle_window", "<ctrl>+<shift>+b")),
-        )
-        save_config(self.config)
-
-    def _on_accounts_changed(self, event: Event):
+        # ISSUE-THM-06：主题身份/种子经协调器完整应用（广播 theme_changed 重着色）
+        self.theme.sync_config(self.config)
+        self.theme.apply_startup(self.config)
+        self.hotkeys.register_toggle(self.windows.toggle, payload["hotkeys"]["toggle_window"])  # ISSUE-UX-02
         save_config(self.config)
 
     def _deferred_init(self):
         threading.Thread(target=self._background_init, daemon=True, name="AppInit").start()
-        self.tray = TrayManager(ICON_PATH, "DeepSeek 余额监控", self._on_tray_show, self._quit)
+        self.tray = TrayManager(ICON_PATH, "DeepSeek 余额监控", self.windows.post_show_main, self._quit)
         self.tray.start()
 
-    def _open_theme_editor(self):
-        """ISSUE-THM-04：打开主题编辑器（非模态，单实例复用）。"""
-        from theme_manager import DEFAULT_USER_THEMES_DIR
-        from theme_editor_window import ThemeEditorWindow
-        if getattr(self, "_theme_editor", None) is None or not self._theme_editor.winfo_exists():
-            self._theme_editor = ThemeEditorWindow(
-                self.windows.main_window,
-                theme_manager=self.theme.theme_manager,
-                builtin_dir=BUILTIN_THEMES_DIR,
-                user_dir=DEFAULT_USER_THEMES_DIR,
-                event_bus=self.event_bus,
-            )
-        self._theme_editor.show()
-        self._theme_editor.raise_()
-        self._theme_editor.activateWindow()
-
-    def _on_tray_show(self):
-        if self.windows.main_window:
-            self.windows.main_window.after(0, self.windows.show_main)
-
     def _background_init(self):
-        """ISSUE-PFM-02：磁盘 IO/建表/端口绑定全部在此后台线程执行。
+        """PFM-02：磁盘 IO/建表/端口绑定在此后台线程执行。
 
-        ISSUE-MIG-08 启动异步化：requests 链（scheduler/proxy/balance_checker/
-        usage_history）的重 import 也在本线程完成，冷启动不为其买单。
+        MIG-08 启动异步化：requests 链的重 import 也在本线程完成，冷启动不为其买单。
         """
         try:
             from balance_checker import set_provider_event_bus
@@ -217,11 +172,9 @@ class App:
             from managers.scheduler_manager import SchedulerManager
             from usage_history import UsageHistory
 
-            # ISSUE-ARC-06：Provider 注册表广播接线（此处 requests 链已就绪）
-            set_provider_event_bus(self.event_bus)
+            set_provider_event_bus(self.event_bus)  # ISSUE-ARC-06：requests 链已就绪
 
-            loaded_config = load_config()
-            self.config = loaded_config
+            self.config = loaded_config = load_config()
             set_level(loaded_config.settings.log_level)
             logger.info("应用启动，版本 %s，日志级别 %s", __version__, loaded_config.settings.log_level)
 
@@ -250,22 +203,20 @@ class App:
 
     def _on_loaded(self):
         self._loaded = True
-        if not self.windows.main_window or not self.windows.main_window.winfo_exists():
-            return
-        self.windows.rebind_loaded_config(self.proxy_manager.get_proxy_token)
-        self.theme.apply_startup(self.config)
-        proxy_info = f"代理: {self.proxy_manager.proxy_url}" if self.proxy_manager.proxy_url else "就绪"
-        self.windows.set_status(proxy_info)
-        if self.config.accounts:
-            self.scheduler_manager.refresh_now()
+        if self.windows.main_window and self.windows.main_window.winfo_exists():
+            self.windows.rebind_loaded_config(self.proxy_manager.get_proxy_token)
+            self.theme.apply_startup(self.config)
+            proxy_info = f"代理: {self.proxy_manager.proxy_url}" if self.proxy_manager.proxy_url else "就绪"
+            self.windows.set_status(proxy_info)
+            if self.config.accounts:
+                self.scheduler_manager.refresh_now()
 
     def _on_load_failed(self):
         self._loaded = False
         self.windows.set_status(f"加载失败: {self._load_error}")
         logger.error("应用启动加载失败，UI 显示错误状态：%s", self._load_error)
 
-    def _on_balance_result(self, result):
-        """调度器回调（后台线程）：记录快照 + 经 after(0) 回主线程更新 UI。"""
+    def _on_balance_result(self, result):  # 调度器回调（后台线程）：快照 + after(0) 更新 UI
         if self._exiting:
             return
         self.scheduler_manager.record_snapshot(result)
@@ -284,16 +235,12 @@ class App:
             self.proxy_manager.stop()
         if self._usage_history is not None:
             self._usage_history.close()  # ISSUE-PFM-08
-        try:
-            from balance_checker import close_all_provider_sessions
-            close_all_provider_sessions()
-        except Exception as e:
-            log_exception("_quit.close_provider_sessions", e)
+        from balance_checker import close_all_provider_sessions
+        close_all_provider_sessions()  # 内部逐 Provider 容错
         self.lifecycle.stop_listener()
         self.lifecycle.release()
         self.hotkeys.unregister()
-        # ISSUE-LOG-03：--force-exit 应急开关保留 os._exit；否则收尾后退出事件循环
-        if "--force-exit" in sys.argv:
+        if "--force-exit" in sys.argv:  # ISSUE-LOG-03：应急开关保留 os._exit，否则退出事件循环
             logger.warning("检测到 --force-exit 开关，使用 os._exit 强制退出")
             os._exit(0)
         self.qt_app.quit()  # 线程安全：exec() 返回后进程正常结束

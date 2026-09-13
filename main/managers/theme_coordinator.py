@@ -23,6 +23,8 @@ class ThemeCoordinator:
     def __init__(self, event_bus: EventBus | None, app: QApplication):
         self.theme_manager = ThemeManager(event_bus=event_bus)
         self._app = app
+        self._builtin_dir = ""
+        self._editor = None  # ISSUE-THM-04：编辑器单实例复用
         if event_bus is not None:
             event_bus.subscribe(EVENT_THEME_CHANGED, self._on_theme_changed)
 
@@ -33,8 +35,25 @@ class ThemeCoordinator:
 
     def load(self, builtin_dir: str) -> None:
         """加载内置主题 + 用户主题目录（同名覆盖）。"""
+        self._builtin_dir = builtin_dir
         self.theme_manager.load_directory(builtin_dir)
         self.load_user()
+
+    def open_editor(self, parent, event_bus) -> None:
+        """ISSUE-THM-04：打开主题编辑器（非模态，单实例复用）。"""
+        from theme_manager import DEFAULT_USER_THEMES_DIR
+        from theme_editor_window import ThemeEditorWindow
+        if self._editor is None or not self._editor.winfo_exists():
+            self._editor = ThemeEditorWindow(
+                parent,
+                theme_manager=self.theme_manager,
+                builtin_dir=self._builtin_dir,
+                user_dir=DEFAULT_USER_THEMES_DIR,
+                event_bus=event_bus,
+            )
+        self._editor.show()
+        self._editor.raise_()
+        self._editor.activateWindow()
 
     def load_user(self) -> None:
         """ISSUE-THM-03：加载用户主题目录（后台加载阶段单独调用）。"""

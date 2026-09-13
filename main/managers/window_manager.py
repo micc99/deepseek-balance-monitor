@@ -56,10 +56,10 @@ class WindowManager:
         self,
         event_bus,
         on_switch_to_floating: Callable,
-        on_apply_theme: Callable,
         on_view_curve: Callable,
         on_view_usage: Callable,
         version_title: str,
+        on_apply_theme: Callable | None = None,  # ISSUE-THM-06 后由 settings_changed 事件承担
         on_open_theme_editor: Callable | None = None,
     ) -> MainWindow:
         """创建主窗口并接线（原 App.run 前半段）。"""
@@ -103,6 +103,11 @@ class WindowManager:
             self.main_window.lift()
             self.main_window.focus()
             self.main_window.after(200, self.main_window.start_focus_monitor)
+
+    def post_show_main(self) -> None:
+        """托盘/热键线程回调入口：after(0) 回主线程展示主窗。"""
+        if self._main_alive():
+            self.main_window.after(0, self.show_main)
 
     def handle_show_signal(self) -> None:
         """IPC show 信号处理（可在监听线程调用）。"""
