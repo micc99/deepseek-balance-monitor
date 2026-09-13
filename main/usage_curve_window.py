@@ -2,378 +2,195 @@ from __future__ import annotations
 
 import time
 from datetime import datetime
-from typing import Optional
 
-import customtkinter as ctk
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from usage_history import UsageHistory, _hash_key
-
-COLOR_BALANCE = "#ce93d8"
-
-# ISSUE-PFM-01：matplotlib 延迟加载缓存。
-# 启动时不 import matplotlib（首次 import 可达 200-500ms），
-# 首次绘图时通过 _ensure_matplotlib() 执行 import + 字体配置，后续直接返回缓存。
-_mpl_cache: dict = {}
+from qss import current_layer
 
 
-def _ensure_matplotlib() -> dict:
-    """延迟加载 matplotlib 模块并配置中文字体。
+"""单账户余额趋势图（Qt + pyqtgraph 版，ISSUE-MIG-07）。
 
-    首次调用时执行 import matplotlib + 字体配置（matplotlib.use("TkAgg")、
-    rcParams 字体设置），后续调用直接返回缓存，避免重复初始化开销。
+双击账户行的余额列打开。数据源为 balance_snapshots 表。
+ISSUE-PFM-01 延迟加载模式保留：模块顶部不 import pyqtgraph，
+首次打开窗口时 _ensure_pyqtgraph() 执行加载（D1 决策：matplotlib → pyqtgraph，
+import ~50ms 且 Qt 原生）。配色直读主题 token（THM-05 AC3）。
 
-    Returns:
-        dict: 包含 matplotlib 绘图所需对象的字典，键为：
-            - 'matplotlib': matplotlib 模块本身
-            - 'FigureCanvasTkAgg': TkAgg 后端的 Canvas 适配器
-            - 'Figure': matplotlib Figure 类
-            - 'mdates': matplotlib.dates 日期处理模块
-    """
-    if _mpl_cache:
-        return _mpl_cache
-    import matplotlib
-    matplotlib.use("TkAgg")
-    import matplotlib.font_manager as _fm
-    _CHINESE_FONTS = ['Microsoft YaHei', 'SimHei', 'DengXian', 'Noto Sans CJK SC']
-    _FONT_NAMES = {f.name for f in _fm.fontManager.ttflist}
-    _CHOSEN_FONT = next((f for f in _CHINESE_FONTS if f in _FONT_NAMES), None)
-    if _CHOSEN_FONT:
-        matplotlib.rcParams['font.sans-serif'] = [_CHOSEN_FONT] + matplotlib.rcParams.get('font.sans-serif', [])
-        matplotlib.rcParams['axes.unicode_minus'] = False
-        matplotlib.rcParams['font.size'] = 10
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    from matplotlib.figure import Figure
-    import matplotlib.dates as mdates
-    _mpl_cache['matplotlib'] = matplotlib
-    _mpl_cache['FigureCanvasTkAgg'] = FigureCanvasTkAgg
-    _mpl_cache['Figure'] = Figure
-    _mpl_cache['mdates'] = mdates
-    return _mpl_cache
+行为差异说明：ctk 版的渐进绘制动画与 grab_set 模态不迁移
+（D6 动画收敛；Qt 版为非模态窗口），hover 提示保留。
+"""
+
+COLOR_BALANCE_KEY = "primary"
 
 TIME_RANGES = [
-    ("1小时", 3600, 60),
-    ("7小时", 25200, 300),
-    ("24小时", 86400, 300),
-    ("7天", 604800, 3600),
+    ("1小时", 3600),
+    ("7小时", 25200),
+    ("24小时", 86400),
+    ("7天", 604800),
 ]
 
-_TIME_FORMATS = {
-    "1小时": "%H:%M",
-    "7小时": "%H:%M",
-    "24小时": "%H:%M",
-    "7天": "%m-%d",
-}
+_pg_cache: dict = {}
 
 
-def _get_theme_colors():
-    if ctk.get_appearance_mode() == "Light":
-        return dict(bg="#ffffff", axes="#f0f0f0", text="#333333",
-                    grid="#cccccc", title="#222222", label="#333333", tick="#222222")
+def _ensure_pyqtgraph() -> dict:
+    """延迟加载 pyqtgraph 并缓存（ISSUE-PFM-01 模式延续）。"""
+    if _pg_cache:
+        return _pg_cache
+    import pyqtgraph as pg
+    pg.setConfigOptions(antialias=True, background=None, foreground=None)
+    _pg_cache["pg"] = pg
+    return _pg_cache
+
+
+def _theme_colors() -> dict:
+    """从当前主题层取图表配色（qss.current_layer 由 build_qss 维护）。"""
+    layer = current_layer()
+    if layer is not None:
+        return dict(bg=layer.background, axes=layer.surface, text=layer.text,
+                    grid=layer.border, primary=layer.primary)
     return dict(bg="#2b2b2b", axes="#333333", text="#cccccc",
-                grid="#444444", title="#eeeeee", label="#cccccc", tick="#cccccc")
+                grid="#444444", primary="#7ba9c4")
 
 
-class BalanceCurveWindow(ctk.CTkToplevel):
-    """单账户余额趋势折线图，支持时间范围切换和渐进动画。
+class BalanceCurveWindow(QWidget):
+    """单账户余额趋势折线图，支持时间范围切换与 hover 取值。"""
 
-    双击账户行的余额列打开。数据源为 balance_snapshots 表。
-    hover 交互通过 matplotlib 的 motion_notify_event 实现。
-    """
-
-    def __init__(self, parent, account_label: str, api_key: str, uid: str, history: UsageHistory):
-        super().__init__(parent)
-        self.title(f"余额趋势 — {account_label}")
-        self.geometry("750x520")
-        self.minsize(550, 400)
-        self.resizable(True, True)
+    def __init__(self, parent, account_label: str, api_key: str, uid: str, history: UsageHistory,
+                 event_bus=None):
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle(f"余额趋势 — {account_label}")
+        self.resize(750, 520)
+        self.setMinimumSize(550, 400)
+        # ISSUE-THM-05：订阅主题变更，打开状态下实时重着色
+        self._unsubscribe_theme = None
+        if event_bus is not None:
+            self._unsubscribe_theme = event_bus.subscribe(
+                "theme_changed", lambda _e: QTimer_single(self._render))
+            self.destroyed.connect(lambda: self._unsubscribe_theme and self._unsubscribe_theme())
 
         self._api_key_hash = _hash_key(api_key)
         self._uid = uid
         self._history = history
         self._account_label = account_label
+        self._hover_text = None
 
-        # matplotlib 延迟加载：先不持有 Figure/Canvas 引用，首次绘图时才创建
-        self._canvas = None
-        self._fig = None
-        self._animating = False
-        self._anim_timer: Optional[str] = None
-        self._loading_label: Optional[ctk.CTkLabel] = None
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(6)
 
-        self._setup_ui()
-        # ISSUE-PFM-01：首次打开窗口时显示 loading 提示，避免空白等待
-        self._show_loading()
-        # 延迟一帧后实际绘图，让 loading 提示先渲染可见
-        self.after(50, lambda: self._render(animate=True))
+        toolbar = QHBoxLayout()
+        title = QLabel(f"账号: {account_label}", objectName="title")
+        toolbar.addWidget(title)
+        toolbar.addStretch(1)
+        self._range_combo = QComboBox()
+        for label, _sec in TIME_RANGES:
+            self._range_combo.addItem(label)
+        self._range_combo.setCurrentText("24小时")
+        self._range_combo.currentTextChanged.connect(lambda _t: self._render())
+        self._range_combo.setFixedWidth(100)
+        toolbar.addWidget(self._range_combo)
+        self._balance_label = QLabel("")
+        self._balance_label.setStyleSheet("font-weight: bold;")
+        toolbar.addWidget(self._balance_label)
+        root.addLayout(toolbar)
 
-        self.grab_set()
-        self.lift()
-        self.focus()
+        self._plot_holder = QVBoxLayout()
+        root.addLayout(self._plot_holder, 1)
 
-    def _show_loading(self):
-        """ISSUE-PFM-01：显示加载提示，告知用户图表正在初始化。"""
-        self._loading_label = ctk.CTkLabel(
-            self,
-            text="加载图表中...",
-            font=ctk.CTkFont(size=14),
-            text_color="gray",
-        )
-        self._loading_label.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-        # 强制立即渲染，避免被后续绘图阻塞
-        self._loading_label.update_idletasks()
+        QTimer_start(self, 50, self._render)  # 让窗口先渲染，再绘图
 
-    def _hide_loading(self):
-        """ISSUE-PFM-01：绘图完成后销毁 loading 提示。"""
-        if self._loading_label is not None:
-            try:
-                self._loading_label.destroy()
-            except Exception:
-                pass
-            self._loading_label = None
+    def _render(self):
+        pg = _ensure_pyqtgraph()["pg"]
+        tc = _theme_colors()
 
-    def destroy(self):
-        """取消动画定时器 + 释放 matplotlib Figure，防止内存泄漏。"""
-        self._cancel_animation()
-        if self._fig is not None:
-            import matplotlib.pyplot as plt
-            plt.close(self._fig)
-            self._fig = None
-        if self._canvas is not None:
-            self._canvas.get_tk_widget().destroy()
-            self._canvas = None
-        super().destroy()
+        if hasattr(self, "_plot") and self._plot is not None:
+            self._plot.setParent(None)
+            self._plot = None
 
-    def _setup_ui(self):
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-
-        toolbar = ctk.CTkFrame(self, fg_color="transparent")
-        toolbar.grid(row=0, column=0, sticky="ew", padx=15, pady=(15, 5))
-        toolbar.grid_columnconfigure(2, weight=1)
-
-        ctk.CTkLabel(
-            toolbar,
-            text=f"账号: {self._account_label}",
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).grid(row=0, column=0, padx=(0, 15))
-
-        range_values = [r[0] for r in TIME_RANGES]
-        self._range_menu = ctk.CTkOptionMenu(
-            toolbar,
-            values=range_values,
-            width=100,
-        )
-        self._range_menu.grid(row=0, column=1, padx=5)
-        self._range_menu.set("24小时")
-        self._range_menu.configure(command=self._on_range_change)
-
-        self._balance_label = ctk.CTkLabel(
-            toolbar,
-            text="",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            anchor="e",
-        )
-        self._balance_label.grid(row=0, column=2, padx=5, sticky="e")
-
-    def _on_range_change(self, _choice):
-        self._render(animate=True)
-
-    def _get_range_params(self):
-        now = time.time()
-        range_label = self._range_menu.get()
-        for _l, duration, bucket in TIME_RANGES:
-            if _l == range_label:
-                return now - duration, range_label
-        return now - 86400, "24小时"
-
-    def _render(self, animate: bool = False):
-        self._cancel_animation()
         since, range_label = self._get_range_params()
         balance_history = self._history.get_balance_history(self._uid, since)
-        self._draw_chart(balance_history, range_label, animate)
-        # ISSUE-PFM-01：绘图完成后销毁 loading 提示
-        self._hide_loading()
 
-    def _draw_chart(self, balance_history, range_label: str, animate: bool):
-        # ISSUE-PFM-01：延迟加载 matplotlib，首次调用时执行 import + 字体配置
-        mpl = _ensure_matplotlib()
-        Figure = mpl['Figure']
-        FigureCanvasTkAgg = mpl['FigureCanvasTkAgg']
-        mdates = mpl['mdates']
-
-        if self._canvas:
-            self._canvas.get_tk_widget().destroy()
-            self._canvas = None
-
-        tc = _get_theme_colors()
-        fig = Figure(figsize=(9, 5), dpi=100)
-        fig.patch.set_facecolor(tc["bg"])
-        self._fig = fig
-
-        ax = fig.add_subplot(111)
-        ax.set_facecolor(tc["axes"])
+        axis = pg.DateAxisItem(orientation="bottom")
+        self._plot = pg.PlotWidget(axisItems={"bottom": axis})
+        self._plot.setBackground(tc["bg"])
+        self._plot_holder.addWidget(self._plot, 1)
 
         if not balance_history:
-            ax.text(0.5, 0.5, "暂无余额变更记录", ha="center", va="center",
-                    transform=ax.transAxes, color=tc["text"], fontsize=12)
-            ax.set_xticks([])
-            ax.set_yticks([])
-            for spine in ax.spines.values():
-                spine.set_visible(False)
-            self._canvas = FigureCanvasTkAgg(fig, master=self)
-            canvas_widget = self._canvas.get_tk_widget()
-            canvas_widget.grid(row=1, column=0, sticky="nsew", padx=10, pady=(5, 10))
-            self.grid_rowconfigure(1, weight=1)
-            canvas_widget.update_idletasks()
-            fig.tight_layout()
-            self._canvas.draw()
+            self._balance_label.setText("")
+            text = pg.TextItem("暂无余额变更记录", color=tc["text"])
+            self._plot.addItem(text)
+            self._plot.hideAxis("left")
+            self._plot.hideAxis("bottom")
             return
 
-        times = [datetime.fromtimestamp(b.timestamp) for b in balance_history]
+        times = [b.timestamp for b in balance_history]
         values = [b.balance for b in balance_history]
         currency = balance_history[0].currency
         symbol = "¥" if currency == "CNY" else "$"
 
-        latest = values[-1]
-        self._balance_label.configure(text=f"当前余额: {symbol}{latest:,.4f}")
+        self._balance_label.setText(f"当前余额: {symbol}{values[-1]:,.4f}")
 
-        fmt = _TIME_FORMATS.get(range_label, "%H:%M")
-        ax.xaxis.set_major_formatter(mdates.DateFormatter(fmt))
-        locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
-        ax.xaxis.set_major_locator(locator)
+        self._plot.showGrid(x=True, y=True, alpha=0.3)
+        self._plot.setTitle("余额趋势", color=tc["text"], size="12pt")
+        self._plot.setLabel("left", f"余额 ({symbol})", color=tc["text"])
+        self._plot.setLabel("bottom", "时间", color=tc["text"])
+        for key in ("left", "bottom"):
+            self._plot.getAxis(key).setPen(pg.mkPen(color=tc["grid"]))
+            self._plot.getAxis(key).setTextPen(pg.mkPen(color=tc["text"]))
 
-        ax.set_title("余额趋势", fontsize=13, color=tc["title"], pad=8)
-        ax.set_ylabel(f"余额 ({symbol})", fontsize=11)
-        ax.set_xlabel("时间", fontsize=11)
-        _style_ax(ax, tc)
-
-        self._canvas = FigureCanvasTkAgg(fig, master=self)
-        canvas_widget = self._canvas.get_tk_widget()
-        canvas_widget.grid(row=1, column=0, sticky="nsew", padx=10, pady=(5, 10))
-        self.grid_rowconfigure(1, weight=1)
-        canvas_widget.update_idletasks()
-        fig.tight_layout()
-        self._canvas.draw()
-
-        self._times = times
-        self._values = values
-        self._fig = fig
-        self._ax = ax
-        self._tc = tc
-
-        self._symbol = symbol
-        self._line = None
-        self._fill = None
-
-        self._hover_annot = ax.annotate(
-            "", xy=(0, 0), xytext=(12, -20), textcoords="offset points",
-            bbox=dict(boxstyle="round,pad=0.4", fc=tc["axes"], ec=tc["grid"], alpha=0.92),
-            color=tc["text"], fontsize=10, ha="left", va="top",
-            arrowprops=dict(arrowstyle="->", color=tc["text"], lw=1.0),
+        line_color = tc["primary"]
+        self._plot.plot(
+            times, values,
+            pen=pg.mkPen(color=line_color, width=2),
+            symbol="o", symbolSize=4,
+            symbolBrush=pg.mkBrush(color=line_color),
         )
-        self._hover_annot.set_visible(False)
-        self._hover_dot, = ax.plot([], [], "o", color="#ffffff", markersize=8,
-                                     markeredgecolor="#ce93d8", markeredgewidth=2.5, zorder=10)
-        self._hover_dot.set_visible(False)
-        self._fig.canvas.mpl_connect("motion_notify_event", self._on_hover)
+        fill = pg.FillBetweenItem(
+            pg.PlotDataItem(times, values),
+            pg.PlotDataItem(times, [0] * len(values)),
+            brush=pg.mkBrush(color=line_color, alpha=40),
+        )
+        self._plot.addItem(fill)
 
-        if animate and len(times) > 1:
-            t_start = mdates.date2num(times[0])
-            t_end = mdates.date2num(times[-1])
-            t_span = t_end - t_start
-            margin = t_span * 0.05
-            ax.set_xlim(t_start - margin, t_end + margin)
-            self._canvas.draw()
-            self._animate_draw()
-        else:
-            self._line, = ax.plot(times, values, color=COLOR_BALANCE, linewidth=1.5,
-                                    marker=".", markersize=3)  # type: ignore[arg-type]
-            self._fill = ax.fill_between(times, values, alpha=0.15, color=COLOR_BALANCE)  # type: ignore[arg-type]
-            self._canvas.draw()
+        # hover 取值：点击/悬停最近数据点显示时间与余额
+        self._hover_text = pg.TextItem(color=tc["text"], anchor=(0, 1))
+        self._hover_text.setBg(30)
+        self._plot.addItem(self._hover_text)
+        self._data = list(zip(times, values))
+        self._symbol = symbol
+        self._scene = self._plot.scene()
+        self._scene.sigMouseMoved.connect(self._on_mouse_moved)
 
-    def _animate_draw(self):
-        if not self._canvas or not self._ax:
+    def _on_mouse_moved(self, pos):
+        if not self._data or self._hover_text is None:
             return
-        if self._animating:
-            self._cancel_animation()
-        self._animating = True
-
-        n = len(self._times)
-        self._anim_total = 20
-        self._anim_step = 0
-
-        _ax = self._ax
-        _times = self._times
-        _values = self._values
-
-        def _step():
-            if not self._animating or not _ax or not self._canvas:
-                return
-            step = self._anim_step
-            total = self._anim_total
-            if step >= total:
-                self._animating = False
-                self._anim_timer = None
-                return
-
-            idx = int((step + 1) / total * n)
-            idx = min(idx, n)
-
-            if self._line is not None:
-                self._line.remove()
-            if self._fill is not None:
-                self._fill.remove()
-
-            slice_times = _times[:idx]
-            slice_values = _values[:idx]
-            self._line, = _ax.plot(slice_times, slice_values, color=COLOR_BALANCE, linewidth=1.5,
-                                     marker=".", markersize=3)  # type: ignore[arg-type]
-            self._fill = _ax.fill_between(slice_times, slice_values, alpha=0.15, color=COLOR_BALANCE)  # type: ignore[arg-type]
-
-            self._canvas.draw()
-            self._anim_step += 1
-            self._anim_timer = self.after(20, _step)
-
-        _step()
-
-    def _cancel_animation(self):
-        self._animating = False
-        if self._anim_timer is not None:
-            self.after_cancel(self._anim_timer)
-            self._anim_timer = None
-
-    def _on_hover(self, event):
-        if not hasattr(self, "_hover_annot") or not hasattr(self, "_hover_dot"):
+        vb = self._plot.getViewBox()
+        mouse_point = vb.mapSceneToView(pos)
+        mx = mouse_point.x()
+        nearest = min(self._data, key=lambda p: abs(p[0] - mx))
+        if abs(nearest[0] - mx) > max(600.0, (self._data[-1][0] - self._data[0][0]) * 0.02):
+            self._hover_text.setText("")
             return
-        if event.inaxes != getattr(self, "_ax", None):
-            self._hover_annot.set_visible(False)
-            self._hover_dot.set_visible(False)
-            self._canvas.draw_idle()
-            return
-        if self._line is None or len(self._times) == 0:
-            return
+        t, v = nearest
+        self._hover_text.setPos(t, v)
+        self._hover_text.setText(
+            f"{datetime.fromtimestamp(t):%Y-%m-%d %H:%M:%S}\n{self._symbol}{v:,.4f}"
+        )
 
-        contains, info = self._line.contains(event)
-        if contains and len(info.get("ind", [])) > 0:
-            idx = info["ind"][0]
-            x = self._times[idx]
-            y = self._values[idx]
-            time_str = x.strftime("%Y-%m-%d %H:%M:%S")
-            self._hover_annot.xy = (mdates.date2num(x), y)
-            self._hover_annot.set_text(f"{time_str}\n{self._symbol}{y:,.4f}")
-            self._hover_annot.set_visible(True)
-            self._hover_dot.set_data([mdates.date2num(x)], [y])
-            self._hover_dot.set_visible(True)
-        else:
-            self._hover_annot.set_visible(False)
-            self._hover_dot.set_visible(False)
-        self._canvas.draw_idle()
+    def _get_range_params(self):
+        now = time.time()
+        range_label = self._range_combo.currentText()
+        for _l, duration in TIME_RANGES:
+            if _l == range_label:
+                return now - duration, range_label
+        return now - 86400, "24小时"
 
 
-def _style_ax(ax, tc):
-    ax.set_facecolor(tc["axes"])
-    ax.tick_params(colors=tc["tick"], labelsize=10)
-    for spine in ax.spines.values():
-        spine.set_color(tc["grid"])
-    ax.grid(True, color=tc["grid"], linewidth=0.4, alpha=0.5)
-    ax.yaxis.label.set_color(tc["label"])
-    ax.xaxis.label.set_color(tc["label"])
+def QTimer_single(ms, fn):
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(ms, fn)
+
+
+def QTimer_start(widget, ms, fn):
+    QTimer_single(ms, fn)

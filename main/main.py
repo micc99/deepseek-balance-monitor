@@ -1,10 +1,13 @@
-__version__ = "1.9.3"
+# ISSUE-MIG-08：注解延迟求值（启动异步化后 Manager 类型仅作 TYPE_CHECKING 注解）
+from __future__ import annotations
+
+__version__ = "2.0.0"
 
 import os
 import sys
 import threading
 
-import customtkinter as ctk
+from PySide6.QtWidgets import QApplication
 
 from config import load_config, save_config, AppConfig
 from log_setup import setup_logging, get_logger, set_level
@@ -18,20 +21,25 @@ from event_bus import (
     EVENT_ACCOUNT_DELETED,
     EVENT_ACCOUNT_UPDATED,
 )
-from balance_checker import set_provider_event_bus
-from usage_history import UsageHistory
 from managers.lifecycle_manager import LifecycleManager
 from managers.tray_manager import TrayManager
 from managers.hotkey_manager import HotkeyManager
 from managers.autostart_manager import AutostartManager
 from managers.theme_coordinator import ThemeCoordinator
 from managers.window_manager import WindowManager
-from managers.scheduler_manager import SchedulerManager
-from managers.proxy_manager import ProxyManager
+
+# ISSUE-MIG-08 启动异步化：scheduler/proxy/balance_checker 链含 requests
+# （实测 import ~345ms），推迟到后台线程加载，冷启动不为其买单。
+# 类型仅用于注解，运行时不触发 import：
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from balance_checker import set_provider_event_bus
+    from managers.scheduler_manager import SchedulerManager
+    from managers.proxy_manager import ProxyManager
+    from usage_history import UsageHistory
 
 logger = get_logger(__name__)
-
-ctk.set_default_color_theme("blue")
 
 LOCK_NAME = "DeepSeekBalanceMonitor"
 IPC_PORT = 52847
@@ -46,26 +54,29 @@ def _get_resource_path(relative_path: str) -> str:
 
 
 ICON_PATH = _get_resource_path(os.path.join("assets", "icon.png"))
-# ISSUE-THM-02：内置莫奈主题目录（打包需加入 PyInstaller datas，Phase C ISSUE-MIG-02 落实）
+# ISSUE-THM-02：内置莫奈主题目录（ISSUE-MIG-08 打包加入 PyInstaller datas）
 BUILTIN_THEMES_DIR = _get_resource_path("themes")
 
 
 class App:
-    """应用编排器（ISSUE-ARC-01）：实例化 Manager 并连接事件，不含子系统实现。
+    """应用编排器（ISSUE-ARC-01 / ISSUE-MIG-02 Qt 化）：实例化 Manager 并连接事件。
 
     职责归属：Lifecycle=锁+IPC / WindowManager=双窗+图表窗+余额UI /
-    ThemeCoordinator=主题接线(THM-01) / Tray·Hotkey·Autostart=托盘热键自启 /
+    ThemeCoordinator=主题→QSS / Tray·Hotkey·Autostart=托盘热键自启 /
     SchedulerManager·ProxyManager=调度代理（后台加载后创建，PFM-02 门）。
     """
 
     def __init__(self):
-        # 日志系统必须最先初始化，确保后续所有模块可正常记录
+        # 日志系统必须最先初始化
         setup_logging(level="INFO", console=True)
 
         self.lifecycle = LifecycleManager(LOCK_NAME, IPC_PORT)
         if not self.lifecycle.acquire():
             self.lifecycle.signal_show()
             sys.exit(0)
+
+        # QApplication 先于任何控件创建
+        self.qt_app = QApplication.instance() or QApplication(sys.argv)
 
         self._exiting = False
         # ISSUE-PFM-02：后台加载状态门——以下两者加载完成前为 None
@@ -78,11 +89,14 @@ class App:
 
         self.config = AppConfig()
 
-        # ISSUE-ARC-02：应用级事件总线；Provider 注册表广播共用（ARC-06）
+        # ISSUE-ARC-02：应用级事件总线
         self.event_bus = EventBus()
-        set_provider_event_bus(self.event_bus)
-        # ISSUE-THM-01：主题协调器（启动期先应用默认外观，加载后按配置重应用）
-        self.theme = ThemeCoordinator(self.event_bus)
+        # ISSUE-ARC-06：Provider 注册表广播接线在 _background_init 中
+        # （set_provider_event_bus 所在模块链含 requests，随启动异步化推迟）
+        # ISSUE-THM-01/MIG-02：主题协调器（内置主题同步加载，保证首帧 QSS 正确；
+        # 三个小 JSON 约 1ms，不构成 PFM-02 延迟加载的对象——那是给建表/端口留的）
+        self.theme = ThemeCoordinator(self.event_bus, self.qt_app)
+        self.theme.load(BUILTIN_THEMES_DIR)
         self.theme.apply_startup(self.config)
 
         # ISSUE-ARC-01：Manager 依赖注入（访问器而非 App 引用）
@@ -94,8 +108,12 @@ class App:
             get_refresh_now=lambda: self.scheduler_manager.refresh_now if self.scheduler_manager else None,
             get_history=lambda: self._usage_history,
             on_exit=self._quit,
+            event_bus=self.event_bus,
         )
-        self.hotkeys.register_toggle(self.windows.toggle)
+        self.hotkeys.register_toggle(
+            self.windows.toggle,
+            self.config.settings.hotkeys.get("toggle_window", "<ctrl>+<shift>+b"),
+        )
 
     # ---- 启动流程 ----
 
@@ -117,7 +135,8 @@ class App:
         self.windows.main_window.after(500, self.windows.main_window.start_focus_monitor)
         # ISSUE-PFM-07：启动完成标记，供 measure_startup_time.py 检测
         print("__STARTUP_DONE__", flush=True)
-        self.windows.main_window.mainloop()
+        self.windows.main_window.show()
+        self.qt_app.exec()
 
     def _wire_events(self):
         """ISSUE-ARC-02：订阅 MainWindow 事件，按 scheduler 就绪状态分派。"""
@@ -144,6 +163,17 @@ class App:
             self.config.settings.interval_sec = max(10, interval)
             logger.info("配置尚未加载完成，间隔设置已暂存")
         self.autostart.set(bool(autostart))
+        # ISSUE-THM-06：主题身份/种子变更经 ThemeCoordinator 完整应用
+        # （apply_startup 内部广播 theme_changed → QSS 全窗重着色）
+        if self.theme is not None:
+            self.theme.sync_config(self.config)
+            self.theme.apply_startup(self.config)
+        # ISSUE-UX-02：全局热键重注册（配置可能已变更）
+        self.hotkeys.register_toggle(
+            self.windows.toggle,
+            payload.get("hotkeys", {}).get(
+                "toggle_window", self.config.settings.hotkeys.get("toggle_window", "<ctrl>+<shift>+b")),
+        )
         save_config(self.config)
 
     def _on_accounts_changed(self, event: Event):
@@ -159,15 +189,27 @@ class App:
             self.windows.main_window.after(0, self.windows.show_main)
 
     def _background_init(self):
-        """ISSUE-PFM-02：磁盘 IO/建表/端口绑定全部在此后台线程执行。"""
+        """ISSUE-PFM-02：磁盘 IO/建表/端口绑定全部在此后台线程执行。
+
+        ISSUE-MIG-08 启动异步化：requests 链（scheduler/proxy/balance_checker/
+        usage_history）的重 import 也在本线程完成，冷启动不为其买单。
+        """
         try:
+            from balance_checker import set_provider_event_bus
+            from managers.proxy_manager import ProxyManager
+            from managers.scheduler_manager import SchedulerManager
+            from usage_history import UsageHistory
+
+            # ISSUE-ARC-06：Provider 注册表广播接线（此处 requests 链已就绪）
+            set_provider_event_bus(self.event_bus)
+
             loaded_config = load_config()
             self.config = loaded_config
             set_level(loaded_config.settings.log_level)
             logger.info("应用启动，版本 %s，日志级别 %s", __version__, loaded_config.settings.log_level)
 
             self._usage_history = UsageHistory()
-            self.theme.load(BUILTIN_THEMES_DIR)
+            self.theme.load_user()
             self.theme.sync_config(loaded_config)
 
             self.proxy_manager = ProxyManager()
@@ -206,7 +248,7 @@ class App:
         logger.error("应用启动加载失败，UI 显示错误状态：%s", self._load_error)
 
     def _on_balance_result(self, result):
-        """调度器回调（后台线程）：记录快照 + post 回主线程更新 UI。"""
+        """调度器回调（后台线程）：记录快照 + 经 after(0) 回主线程更新 UI。"""
         if self._exiting:
             return
         self.scheduler_manager.record_snapshot(result)
@@ -233,12 +275,11 @@ class App:
         self.lifecycle.stop_listener()
         self.lifecycle.release()
         self.hotkeys.unregister()
-        # ISSUE-LOG-03：默认 sys.exit 优雅退出，--force-exit 应急开关保留 os._exit
+        # ISSUE-LOG-03：--force-exit 应急开关保留 os._exit；否则收尾后退出事件循环
         if "--force-exit" in sys.argv:
             logger.warning("检测到 --force-exit 开关，使用 os._exit 强制退出")
             os._exit(0)
-        else:
-            sys.exit(0)
+        self.qt_app.quit()  # 线程安全：exec() 返回后进程正常结束
 
 
 def main():

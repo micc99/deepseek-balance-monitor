@@ -33,12 +33,14 @@ class WindowManager:
         get_refresh_now: Callable[[], Optional[Callable]],
         get_history: Callable[[], object],
         on_exit: Callable[[], None],
+        event_bus=None,
     ):
         self._config_provider = config_provider
         self._get_last_results = get_last_results
         self._get_refresh_now = get_refresh_now
         self._get_history = get_history
         self._on_exit = on_exit
+        self._event_bus = event_bus  # ISSUE-THM-05：图表窗订阅主题变更用
         self.main_window: MainWindow | None = None
         self.floating_window: FloatingWindow | None = None
         self._pending_show = False
@@ -215,6 +217,7 @@ class WindowManager:
                 api_key=account.api_key,
                 uid=account.uid,
                 history=self._get_history(),
+                event_bus=self._event_bus,
             )
 
     def open_usage_window(self) -> None:
@@ -228,6 +231,7 @@ class WindowManager:
                 self.main_window,
                 history=self._get_history(),
                 accounts=self._config_provider().accounts,
+                event_bus=self._event_bus,
             )
 
     # ---- 退出 ----
